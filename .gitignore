@@ -1,0 +1,4 @@
+.env
+ocr_documents.db
+__pycache__/
+*.pyc
