@@ -264,8 +264,18 @@ st.markdown("""
 OCR_API_KEY = os.getenv("OCR_API_KEY", "")
 OCR_URL = "https://api.ocr.space/parse/image"
 
-SUPABASE_URL = os.getenv("SUPABASE_URL") or st.secrets.get("SUPABASE_URL", "")
-SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY") or st.secrets.get("SUPABASE_ANON_KEY", "")
+def _get_secret(key: str, default: str = "") -> str:
+    """Safely read from env vars first, then st.secrets, with fallback."""
+    val = os.getenv(key)
+    if val:
+        return val
+    try:
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
+
+SUPABASE_URL = _get_secret("SUPABASE_URL")
+SUPABASE_KEY = _get_secret("SUPABASE_ANON_KEY")
 
 @st.cache_resource
 def get_supabase() -> Client:
@@ -317,29 +327,110 @@ def auth_logout():
     st.session_state.user = None
     st.session_state.access_token = None
 
-def save_extraction(doc_type: str, fields: dict, raw_text: str = ""):
+def _table_for(doc_type: str) -> str:
+    """Map doc_type to its dedicated Supabase table."""
+    return {
+        "aadhaar": "aadhaar_extractions",
+        "pan":     "pan_extractions",
+    }.get(doc_type, "other_extractions")
+
+def save_extraction(doc_type: str, fields: dict, raw_text: str = "",
+                    file_name: str = "", file_size_bytes: int = 0):
+    """
+    Save extracted fields to the correct per-doc-type table.
+    
+    Tables:
+      aadhaar_extractions — id, user_id, user_email, holder_name, aadhaar_number,
+                            dob, gender, address, pincode, state, vid,
+                            raw_text, file_name, file_size_kb, ocr_confidence,
+                            created_at
+      pan_extractions     — id, user_id, user_email, holder_name, pan_number,
+                            father_name, dob, account_type, issued_by,
+                            raw_text, file_name, file_size_kb, ocr_confidence,
+                            created_at
+      other_extractions   — id, user_id, user_email, raw_text, file_name,
+                            file_size_kb, created_at
+    """
     if not st.session_state.user:
         return False, "Not logged in"
     try:
         supabase.postgrest.auth(st.session_state.access_token)
-        supabase.table("ocr_extractions").insert({
-            "user_id": st.session_state.user.id,
-            "doc_type": doc_type,
-            "fields": fields,
-            "raw_text": raw_text
-        }).execute()
+        uid    = st.session_state.user.id
+        email  = st.session_state.user.email
+        table  = _table_for(doc_type)
+        size_kb = round(file_size_bytes / 1024, 1) if file_size_bytes else 0
+
+        if doc_type == "aadhaar":
+            row = {
+                "user_id":        uid,
+                "user_email":     email,
+                "holder_name":    fields.get("Name", ""),
+                "aadhaar_number": fields.get("Aadhaar Number", ""),
+                "dob":            fields.get("Date of Birth", ""),
+                "gender":         fields.get("Gender", ""),
+                "address":        fields.get("Address", ""),
+                "pincode":        fields.get("Pincode", ""),
+                "state":          fields.get("State", ""),
+                "vid":            fields.get("VID", ""),
+                "raw_text":       raw_text[:4000],
+                "file_name":      file_name,
+                "file_size_kb":   size_kb,
+            }
+        elif doc_type == "pan":
+            row = {
+                "user_id":      uid,
+                "user_email":   email,
+                "holder_name":  fields.get("Name", ""),
+                "pan_number":   fields.get("PAN Number", ""),
+                "father_name":  fields.get("Father's Name", ""),
+                "dob":          fields.get("Date of Birth", ""),
+                "account_type": fields.get("Account Type", ""),
+                "issued_by":    fields.get("Issued By", ""),
+                "raw_text":     raw_text[:4000],
+                "file_name":    file_name,
+                "file_size_kb": size_kb,
+            }
+        else:
+            row = {
+                "user_id":      uid,
+                "user_email":   email,
+                "raw_text":     raw_text[:4000],
+                "file_name":    file_name,
+                "file_size_kb": size_kb,
+            }
+
+        supabase.table(table).insert(row).execute()
         return True, None
     except Exception as e:
         return False, str(e)
 
 def load_extractions():
+    """Load all extractions for current user across all three tables."""
+    if not st.session_state.user:
+        return []
     try:
         supabase.postgrest.auth(st.session_state.access_token)
-        res = supabase.table("ocr_extractions") \
-            .select("*") \
-            .order("created_at", desc=True) \
-            .execute()
-        return res.data
+        uid = st.session_state.user.id
+        results = []
+
+        for doc_type, table in [("aadhaar", "aadhaar_extractions"),
+                                  ("pan",     "pan_extractions"),
+                                  ("other",   "other_extractions")]:
+            try:
+                res = supabase.table(table) \
+                    .select("*") \
+                    .eq("user_id", uid) \
+                    .order("created_at", desc=True) \
+                    .execute()
+                for r in (res.data or []):
+                    r["_doc_type"] = doc_type
+                    results.append(r)
+            except Exception:
+                pass  # table may not exist yet, skip silently
+
+        # Sort merged results by created_at descending
+        results.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+        return results
     except Exception as e:
         log_failure("Supabase Fetch", str(e))
         return []
@@ -926,7 +1017,22 @@ st.divider()
 # ================================================================
 # 12. FILE UPLOADER
 # ================================================================
-uploaded_file = st.file_uploader("📂 Upload image or PDF", type=["png", "jpg", "jpeg", "webp", "pdf"])
+uploaded_file = st.file_uploader(
+    "📂 Upload image or PDF (max 5 MB)",
+    type=["png", "jpg", "jpeg", "webp", "pdf"]
+)
+
+# ── 5 MB size guard ───────────────────────────────────────────────
+MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 MB
+if uploaded_file is not None:
+    uploaded_file.seek(0, 2)
+    _fsize = uploaded_file.tell()
+    uploaded_file.seek(0)
+    if _fsize > MAX_FILE_BYTES:
+        st.error(f"❌ File too large ({round(_fsize/1024/1024,2)} MB). Maximum allowed is **5 MB**.")
+        uploaded_file = None
+    else:
+        st.caption(f"📦 {uploaded_file.name}  ·  {round(_fsize/1024,1)} KB  ({round(_fsize/1024/1024,2)} MB)")
 
 # ================================================================
 # 13. SAMPLE BUTTONS (Document Mode only)
@@ -984,7 +1090,7 @@ if mode == "Document" and st.session_state.get("sample_text"):
         _conf = min(len(_fields) / _exp, 1.0)
         st.markdown(confidence_bar(_conf, "Extraction Confidence"), unsafe_allow_html=True)
 
-        saved, save_err = save_extraction(_stype, _fields, _stext)
+        saved, save_err = save_extraction(_stype, _fields, _stext, file_name='sample_'+_stype, file_size_bytes=len(_stext.encode()))
         if saved:
             st.success("✅ Saved to your account.")
         else:
@@ -1148,7 +1254,9 @@ if uploaded_file and st.button("🚀 Extract Text", use_container_width=True):
                         f"Low confidence ({int(conf*100)}%): {len(fields)} of ~{expected} fields found")
                 st.markdown(confidence_bar(conf, "Extraction Confidence"), unsafe_allow_html=True)
 
-                saved, save_err = save_extraction(doc_type, fields, combined_text)
+                saved, save_err = save_extraction(doc_type, fields, combined_text,
+                    file_name=getattr(uploaded_file,'name',''),
+                    file_size_bytes=_fsize if 'uploaded_file' in dir() else 0)
                 if saved:
                     st.success("✅ Extraction saved to your account.")
                 else:
@@ -1194,17 +1302,46 @@ with st.expander("🗂 My Saved Extractions", expanded=False):
     if not records:
         st.markdown("<p style='color:#6b7280;'>No saved extractions yet.</p>", unsafe_allow_html=True)
     else:
+        st.caption(f"{len(records)} record(s) found")
         for r in records:
-            ts        = r["created_at"][:16].replace("T", " ")
-            doc_label = {"aadhaar": "Aadhaar", "pan": "PAN", "unknown": "Unknown"}.get(r["doc_type"], r["doc_type"])
-            name      = r["fields"].get("Name", "—")
-            with st.expander(f"📄 {doc_label} · {name} · {ts}"):
-                st.markdown(f'<div class="info-card">{render_kv_table(r["fields"])}</div>',
+            ts     = r.get("created_at", "")[:16].replace("T", " ")
+            dtype  = r.get("doc_type", "other")
+            dlabel = {"aadhaar": "Aadhaar", "pan": "PAN", "other": "Other"}.get(dtype, dtype.title())
+            name   = r.get("holder_name") or "—"
+            fname  = r.get("file_name") or "sample"
+            fsize  = r.get("file_size_kb") or ""
+            rid    = r.get("id", "x")
+
+            # Rebuild clean display dict — only non-empty values
+            if dtype == "aadhaar":
+                keys = [("Name",           "holder_name"),
+                        ("Aadhaar Number", "aadhaar_number"),
+                        ("Date of Birth",  "dob"),
+                        ("Gender",         "gender"),
+                        ("Address",        "address"),
+                        ("Pincode",        "pincode"),
+                        ("State",          "state"),
+                        ("VID",            "vid")]
+            elif dtype == "pan":
+                keys = [("Name",          "holder_name"),
+                        ("PAN Number",    "pan_number"),
+                        ("Father's Name","father_name"),
+                        ("Date of Birth", "dob"),
+                        ("Account Type",  "account_type"),
+                        ("Issued By",     "issued_by")]
+            else:
+                keys = [("Raw Text", "raw_text")]
+
+            display = {label: r[col] for label, col in keys if r.get(col)}
+
+            with st.expander(f"📄 {dlabel}  ·  {name}  ·  {ts}"):
+                st.caption(f"📁 {fname}{'  ·  ' + str(fsize) + ' KB' if fsize else ''}  ·  {ts}")
+                st.markdown(f'<div class="info-card">{render_kv_table(display)}</div>',
                             unsafe_allow_html=True)
                 st.download_button("⬇ Download JSON",
-                    data=json.dumps(r["fields"], indent=2, ensure_ascii=False),
-                    file_name=f"{r['doc_type']}_{r['id'][:8]}.json",
-                    mime="application/json", key=f"hist_dl_{r['id']}")
+                    data=json.dumps(display, indent=2, ensure_ascii=False),
+                    file_name=f"{dtype}_{rid[:8]}.json",
+                    mime="application/json", key=f"hist_dl_{rid}")
 
 # ================================================================
 # 17. FAILURE LOG
