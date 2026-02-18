@@ -327,110 +327,47 @@ def auth_logout():
     st.session_state.user = None
     st.session_state.access_token = None
 
-def _table_for(doc_type: str) -> str:
-    """Map doc_type to its dedicated Supabase table."""
-    return {
-        "aadhaar": "aadhaar_extractions",
-        "pan":     "pan_extractions",
-    }.get(doc_type, "other_extractions")
-
 def save_extraction(doc_type: str, fields: dict, raw_text: str = "",
                     file_name: str = "", file_size_bytes: int = 0):
-    """
-    Save extracted fields to the correct per-doc-type table.
-    
-    Tables:
-      aadhaar_extractions — id, user_id, user_email, holder_name, aadhaar_number,
-                            dob, gender, address, pincode, state, vid,
-                            raw_text, file_name, file_size_kb, ocr_confidence,
-                            created_at
-      pan_extractions     — id, user_id, user_email, holder_name, pan_number,
-                            father_name, dob, account_type, issued_by,
-                            raw_text, file_name, file_size_kb, ocr_confidence,
-                            created_at
-      other_extractions   — id, user_id, user_email, raw_text, file_name,
-                            file_size_kb, created_at
-    """
+    """Save to single extractions table."""
     if not st.session_state.user:
         return False, "Not logged in"
     try:
         supabase.postgrest.auth(st.session_state.access_token)
-        uid    = st.session_state.user.id
-        email  = st.session_state.user.email
-        table  = _table_for(doc_type)
         size_kb = round(file_size_bytes / 1024, 1) if file_size_bytes else 0
-
-        if doc_type == "aadhaar":
-            row = {
-                "user_id":        uid,
-                "user_email":     email,
-                "holder_name":    fields.get("Name", ""),
-                "aadhaar_number": fields.get("Aadhaar Number", ""),
-                "dob":            fields.get("Date of Birth", ""),
-                "gender":         fields.get("Gender", ""),
-                "address":        fields.get("Address", ""),
-                "pincode":        fields.get("Pincode", ""),
-                "state":          fields.get("State", ""),
-                "vid":            fields.get("VID", ""),
-                "raw_text":       raw_text[:4000],
-                "file_name":      file_name,
-                "file_size_kb":   size_kb,
-            }
-        elif doc_type == "pan":
-            row = {
-                "user_id":      uid,
-                "user_email":   email,
-                "holder_name":  fields.get("Name", ""),
-                "pan_number":   fields.get("PAN Number", ""),
-                "father_name":  fields.get("Father's Name", ""),
-                "dob":          fields.get("Date of Birth", ""),
-                "account_type": fields.get("Account Type", ""),
-                "issued_by":    fields.get("Issued By", ""),
-                "raw_text":     raw_text[:4000],
-                "file_name":    file_name,
-                "file_size_kb": size_kb,
-            }
-        else:
-            row = {
-                "user_id":      uid,
-                "user_email":   email,
-                "raw_text":     raw_text[:4000],
-                "file_name":    file_name,
-                "file_size_kb": size_kb,
-            }
-
-        supabase.table(table).insert(row).execute()
+        row = {
+            "user_id":        st.session_state.user.id,
+            "user_email":     st.session_state.user.email,
+            "doc_type":       doc_type,
+            "file_name":      file_name,
+            "file_size_kb":   size_kb,
+            "holder_name":    fields.get("Name", ""),
+            "dob":            fields.get("Date of Birth", ""),
+            "aadhaar_number": fields.get("Aadhaar Number", ""),
+            "gender":         fields.get("Gender", ""),
+            "address":        fields.get("Address", ""),
+            "pincode":        fields.get("Pincode", ""),
+            "state":          fields.get("State", ""),
+            "vid":            fields.get("VID", ""),
+            "pan_number":     fields.get("PAN Number", ""),
+            "father_name":    fields.get("Father's Name", ""),
+            "account_type":   fields.get("Account Type", ""),
+            "issued_by":      fields.get("Issued By", ""),
+            "raw_text":       raw_text[:4000],
+        }
+        supabase.table("extractions").insert(row).execute()
         return True, None
     except Exception as e:
         return False, str(e)
 
 def load_extractions():
-    """Load all extractions for current user across all three tables."""
+    """Load all extractions for current user, newest first."""
     if not st.session_state.user:
         return []
     try:
         supabase.postgrest.auth(st.session_state.access_token)
-        uid = st.session_state.user.id
-        results = []
-
-        for doc_type, table in [("aadhaar", "aadhaar_extractions"),
-                                  ("pan",     "pan_extractions"),
-                                  ("other",   "other_extractions")]:
-            try:
-                res = supabase.table(table) \
-                    .select("*") \
-                    .eq("user_id", uid) \
-                    .order("created_at", desc=True) \
-                    .execute()
-                for r in (res.data or []):
-                    r["_doc_type"] = doc_type
-                    results.append(r)
-            except Exception:
-                pass  # table may not exist yet, skip silently
-
-        # Sort merged results by created_at descending
-        results.sort(key=lambda r: r.get("created_at", ""), reverse=True)
-        return results
+        res = supabase.table("extractions")             .select("*")             .eq("user_id", st.session_state.user.id)             .order("created_at", desc=True)             .execute()
+        return res.data or []
     except Exception as e:
         log_failure("Supabase Fetch", str(e))
         return []
