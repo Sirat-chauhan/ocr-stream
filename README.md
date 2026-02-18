@@ -1,34 +1,73 @@
 
-# 📄 OCR Document Extraction App
+# 📄 OCR Document Intelligence App
 
-A secure document OCR web application built with Streamlit that extracts text from uploaded documents and stores structured results in Supabase with user-level data isolation.
+A full-featured OCR-based document extraction system built with Streamlit and Supabase.
 
----
-
-## 🚀 Features
-
-* 📤 Upload document images (Aadhaar, PAN, Custom)
-* 🔍 Extract text using OCR API
-* 🗄 Store structured data in Supabase
-* 🖼 Store images in Supabase Storage (private bucket)
-* 🔐 Row-Level Security (RLS) enabled
-* 👤 User-based data separation
-* ☁️ Deployable on Streamlit Cloud
+This application extracts structured data from multiple Indian government ID documents and securely stores both images and extracted data with user-level isolation.
 
 ---
 
-## 🛠 Tech Stack
+# 🚀 Features
+
+### 📤 Upload Options
+
+* Image upload (JPG, PNG)
+* Camera capture
+* Multi-page PDF support
+
+### 🪪 Supported Documents
+
+* Aadhaar Card
+* PAN Card
+* Driving License
+* Voter ID
+* Custom document parsing
+
+### 🔍 OCR Processing
+
+* OCR powered via OCR.space API
+* Structured field extraction using regex parsing
+* Raw text preservation
+
+### 🗄 Backend
+
+* Supabase Database (PostgreSQL)
+* Supabase Storage (Private Bucket)
+* Row Level Security (RLS) enabled
+* User-based data separation
+
+---
+
+# 🛠 Tech Stack
 
 * Python
 * Streamlit
 * OCR.space API
-* Supabase (Database + Storage + Auth)
-* PostgreSQL (via Supabase)
+* Supabase (Auth + Database + Storage)
+* PostgreSQL
 * python-dotenv
 
 ---
 
-# 🗄 Database Architecture
+# 🏗 System Architecture
+
+```
+User Upload
+     ↓
+Streamlit App
+     ↓
+OCR.space API
+     ↓
+Structured Parsing
+     ↓
+Supabase Storage (Image)
+     ↓
+Supabase Database (Extracted Data)
+```
+
+---
+
+# 🗄 Database Structure
 
 ## ✅ Table: `documents`
 
@@ -38,7 +77,7 @@ Single scalable table for all document types.
 create table documents (
   id uuid default gen_random_uuid() primary key,
   user_id uuid references auth.users(id) on delete cascade not null,
-  doc_type text not null, -- aadhaar, pan, other
+  doc_type text not null, -- aadhaar, pan, dl, voter, other
   image_url text not null,
   extracted_data jsonb not null,
   raw_text text,
@@ -50,8 +89,6 @@ create table documents (
 
 ## 🔐 Row Level Security (RLS)
 
-Users can only access their own documents.
-
 ```sql
 alter table documents enable row level security;
 
@@ -61,21 +98,25 @@ for all
 using (auth.uid() = user_id);
 ```
 
----
-
-# 🖼 Image Storage
-
-* Create a **private bucket** in Supabase Storage
-* Upload document images there
-* Store only the `image_url` inside the database
-
-⚠️ Do NOT store base64 images inside the database.
+Users can only see their own uploaded documents.
 
 ---
 
-# 📦 Example Stored Data
+# 🖼 Supabase Storage Setup
 
-## Aadhaar Example (JSONB)
+1. Create a bucket
+2. Disable **Public bucket**
+3. Enable file size restriction
+4. Enable MIME restriction (image/jpeg, image/png, application/pdf)
+
+⚠️ Store only `image_url` in the database
+⚠️ Do NOT store base64 images in DB
+
+---
+
+# 📦 Example Extracted Data (JSONB)
+
+### Aadhaar
 
 ```json
 {
@@ -85,7 +126,7 @@ using (auth.uid() = user_id);
 }
 ```
 
-## PAN Example (JSONB)
+### PAN
 
 ```json
 {
@@ -95,18 +136,32 @@ using (auth.uid() = user_id);
 }
 ```
 
-Using `jsonb` makes the system:
+### Driving License
 
-* Flexible
-* Scalable
-* Clean
-* Easy to extend for new document types
+```json
+{
+  "name": "Rahul Kumar",
+  "dl_number": "DL-0420110149646",
+  "dob": "01/01/1995",
+  "valid_till": "01/01/2035"
+}
+```
+
+### Voter ID
+
+```json
+{
+  "name": "Rahul Kumar",
+  "voter_id": "ABC1234567",
+  "father_name": "Ramesh Kumar"
+}
+```
 
 ---
 
 # 🔑 Environment Variables
 
-Create a `.env` file:
+Create `.env` file:
 
 ```
 OCR_API_KEY=your_ocr_api_key
@@ -114,7 +169,7 @@ SUPABASE_URL=https://your-project-id.supabase.co
 SUPABASE_SERVICE_KEY=your_service_role_key
 ```
 
-⚠️ Never commit `.env` to GitHub
+⚠️ Never push `.env` to GitHub
 ⚠️ Add `.env` to `.gitignore`
 
 ---
@@ -140,19 +195,13 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-App runs at:
-
-```
-http://localhost:8501
-```
-
 ---
 
-# ☁️ Deploy on Streamlit Cloud
+# ☁️ Deployment
 
 1. Push code to GitHub
 2. Connect repo to Streamlit Cloud
-3. Add secrets in App Settings → Secrets
+3. Add secrets in App Settings
 
 Example:
 
@@ -164,20 +213,30 @@ SUPABASE_SERVICE_KEY = "your_key"
 
 ---
 
-# 🔐 Security Best Practices
+# 🔐 Security Features
 
-* Enable Row Level Security
-* Use private storage buckets
-* Never expose Service Role Key publicly
-* Use Auth for user-based access
-* Validate file type and size before upload
+* Row Level Security enabled
+* Private storage bucket
+* User-based access control
+* No public image exposure
+* Environment variable protection
 
 ---
 
-# 📌 Future Improvements
+# 📌 Future Enhancements
 
-* Add full Supabase Authentication login
-* Add dashboard to view user uploads
-* Add document history page
-* Add download structured data feature
-* Add admin panel
+* Full Supabase Authentication UI
+* Admin dashboard
+* Download extracted data as CSV
+* Analytics dashboard
+* Document verification scoring
+
+---
+
+# 🏆 Project Highlights
+
+* Multi-document OCR intelligence
+* Scalable database design (JSONB-based)
+* Secure cloud architecture
+* Production-ready structure
+* Clean Git workflow
