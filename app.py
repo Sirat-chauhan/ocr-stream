@@ -319,7 +319,13 @@ def auth_login(email: str, password: str):
 
 def auth_signup(email: str, password: str):
     try:
-        supabase.auth.sign_up({"email": email, "password": password})
+        supabase.auth.sign_up({
+            "email": email,
+            "password": password,
+            "options": {
+                "email_redirect_to": "https://ocr-stream-nhjd5pbhtxcm99hfgncbre.streamlit.app"
+            }
+        })
         return True, None
     except Exception as e:
         return False, str(e)
@@ -1148,7 +1154,22 @@ with input_tab1:
 
 with input_tab2:
     st.info("📱 Works best on mobile. Point your camera at the document and tap capture.", icon="ℹ️")
-    camera_image = st.camera_input("Take a photo of your document")
+
+    if "camera_open" not in st.session_state:
+        st.session_state.camera_open = False
+
+    col_cam1, col_cam2 = st.columns(2)
+    with col_cam1:
+        if st.button("📷 Open Camera", use_container_width=True, key="btn_open_cam"):
+            st.session_state.camera_open = True
+    with col_cam2:
+        if st.button("✖ Close Camera", use_container_width=True, key="btn_close_cam"):
+            st.session_state.camera_open = False
+
+    camera_image = None
+    if st.session_state.camera_open:
+        camera_image = st.camera_input("Take a photo of your document")
+
     if camera_image is not None:
         camera_image.seek(0, 2)
         _csz = camera_image.tell()
@@ -1156,12 +1177,11 @@ with input_tab2:
         if _csz > MAX_FILE_BYTES:
             st.error(f"❌ Camera capture too large ({round(_csz/1024/1024,2)} MB).")
         else:
-            # Wrap camera image as uploadedfile-compatible object with .name
             camera_image.name = "camera_capture.jpg"
             uploaded_file = camera_image
             _fsize        = _csz
+            st.session_state.camera_open = False  # auto-close after capture
             st.caption(f"📷 Camera capture  ·  {round(_csz/1024,1)} KB")
-
 # ================================================================
 # 13. SAMPLE BUTTONS (Document Mode only)
 # ================================================================
