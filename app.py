@@ -10,6 +10,11 @@ from datetime import datetime
 from PIL import Image, ImageEnhance
 import io
 from supabase import create_client, Client
+try:
+    from pdf2image import convert_from_bytes
+    PDF2IMAGE_AVAILABLE = True
+except ImportError:
+    PDF2IMAGE_AVAILABLE = False
 
 # ================================================================
 # 1. PAGE CONFIG
@@ -342,49 +347,53 @@ def auth_logout():
 
 def save_extraction(doc_type: str, fields: dict, raw_text: str = "",
                     file_name: str = "", file_size_bytes: int = 0):
-    """Save to single extractions table."""
+    """Save to extractions table. Skips silently if duplicate document detected."""
     if not st.session_state.user:
         return False, "Not logged in"
     try:
         supabase.postgrest.auth(st.session_state.access_token)
         size_kb = round(file_size_bytes / 1024, 1) if file_size_bytes else 0
         row = {
-            "user_id":              st.session_state.user.id,
-            "user_email":           st.session_state.user.email,
-            "doc_type":             doc_type if doc_type in ("aadhaar","pan","dl","voter") else "other",
-            "file_name":            file_name,
-            "file_size_kb":         size_kb,
-            "holder_name":          fields.get("Name", ""),
-            "dob":                  fields.get("Date of Birth", ""),
+            # ── user_id only — no user_email (email lives in auth.users) ──
+            "user_id":           st.session_state.user.id,
+            "doc_type":          doc_type if doc_type in ("aadhaar","pan","dl","voter") else "other",
+            "file_name":         file_name,
+            "file_size_kb":      size_kb,
+            "holder_name":       fields.get("Name", ""),
+            "dob":               fields.get("Date of Birth", ""),
             # Aadhaar
-            "aadhaar_number":       fields.get("Aadhaar Number", ""),
-            "gender":               fields.get("Gender", ""),
-            "address":              fields.get("Address", ""),
-            "pincode":              fields.get("Pincode", ""),
-            "state":                fields.get("State", ""),
-            "vid":                  fields.get("VID", ""),
+            "aadhaar_number":    fields.get("Aadhaar Number", ""),
+            "gender":            fields.get("Gender", ""),
+            "address":           fields.get("Address", ""),
+            "pincode":           fields.get("Pincode", ""),
+            "state":             fields.get("State", ""),
+            "vid":               fields.get("VID", ""),
             # PAN
-            "pan_number":           fields.get("PAN Number", ""),
-            "father_name":          fields.get("Father's Name", ""),
-            "account_type":         fields.get("Account Type", ""),
-            "issued_by":            fields.get("Issued By", ""),
+            "pan_number":        fields.get("PAN Number", ""),
+            "father_name":       fields.get("Father's Name", ""),
+            "account_type":      fields.get("Account Type", ""),
+            "issued_by":         fields.get("Issued By", ""),
             # DL
-            "dl_number":            fields.get("DL Number", ""),
-            "valid_till":           fields.get("Valid Till", ""),
-            "vehicle_class":        fields.get("Vehicle Class", ""),
-            "blood_group":          fields.get("Blood Group", ""),
-            "issuing_authority":    fields.get("Issuing Authority", ""),
+            "dl_number":         fields.get("DL Number", ""),
+            "valid_till":        fields.get("Valid Till", ""),
+            "vehicle_class":     fields.get("Vehicle Class", ""),
+            "blood_group":       fields.get("Blood Group", ""),
+            "issuing_authority": fields.get("Issuing Authority", ""),
             # Voter
-            "epic_number":          fields.get("EPIC Number", ""),
-            "father_husband_name":  fields.get("Father/Husband Name", ""),
-            "constituency":         fields.get("Constituency", ""),
-            "part_no":              fields.get("Part No", ""),
-            "raw_text":             raw_text[:4000],
+            "epic_number":           fields.get("EPIC Number", ""),
+            "father_husband_name":   fields.get("Father/Husband Name", ""),
+            "constituency":          fields.get("Constituency", ""),
+            "part_no":               fields.get("Part No", ""),
+            "raw_text":              raw_text[:4000],
         }
         supabase.table("extractions").insert(row).execute()
         return True, None
     except Exception as e:
-        return False, str(e)
+        err = str(e)
+        # Unique index violation = duplicate document — not a real error
+        if "duplicate" in err.lower() or "unique" in err.lower() or "23505" in err:
+            return False, "duplicate"
+        return False, err
 
 def load_extractions():
     """Load all extractions for current user, newest first."""
@@ -628,31 +637,48 @@ def compress_image_bytes(raw_bytes: bytes) -> bytes:
 
 
 def perform_ocr(raw_bytes: bytes, language_code: str, engine_code: int,
-                _retry: bool = True) -> dict:
+                is_pdf: bool = False, _retry: bool = True) -> dict:
     """
-    Takes raw image bytes (not a file handle) — eliminates all seek/pointer bugs.
-    Compresses first, sends to OCR.space, retries with Engine 1 on timeout.
+    Takes raw bytes (image or PDF).
+    - Images: compressed to <280 KB before sending.
+    - PDFs: sent as-is (Image.open doesn't work on PDFs).
+    - Engine 3 is image-only / handwriting; auto-downgraded to Engine 2 for PDFs.
+    - Retries once with Engine 1 on timeout.
     """
     if not OCR_API_KEY:
         err = "Missing OCR_API_KEY"
         log_failure("OCR API", err)
         return {"error": err}
+
     try:
-        # Always compress — the single biggest fix for timeout errors
-        compressed_bytes = compress_image_bytes(raw_bytes)
-        kb = round(len(compressed_bytes) / 1024, 1)
+        if is_pdf:
+            # PDFs must NOT be compressed/converted — send raw bytes as PDF
+            # Engine 3 does NOT support PDFs — silently downgrade
+            safe_engine = 1 if engine_code == 3 else engine_code
+            if engine_code == 3:
+                log_failure("Engine Warning", "Engine 3 doesn't support PDFs — using Engine 2")
+                safe_engine = 2
+            send_bytes = raw_bytes
+            filename   = "document.pdf"
+            mimetype   = "application/pdf"
+        else:
+            # Images: always compress before sending
+            safe_engine = engine_code
+            send_bytes  = compress_image_bytes(raw_bytes)
+            filename    = "image.jpg"
+            mimetype    = "image/jpeg"
 
         response = requests.post(
             OCR_URL,
             data={
                 "apikey":            OCR_API_KEY,
                 "language":          language_code,
-                "OCREngine":         engine_code,
-                "isOverlayRequired": False,   # faster — we don't need overlay
-                "detectOrientation": True,    # handles rotated phone photos
-                "scale":             True,    # OCR.space upscales internally
+                "OCREngine":         safe_engine,
+                "isOverlayRequired": False,
+                "detectOrientation": True,
+                "scale":             True,
             },
-            files={"file": ("image.jpg", compressed_bytes, "image/jpeg")},
+            files={"file": (filename, send_bytes, mimetype)},
             timeout=90,
         )
         response.raise_for_status()
@@ -662,8 +688,9 @@ def perform_ocr(raw_bytes: bytes, language_code: str, engine_code: int,
             err_msgs = result.get("ErrorMessage", ["Unknown OCR error"])
             err_str  = "; ".join(err_msgs) if isinstance(err_msgs, list) else str(err_msgs)
             if _retry and ("timed out" in err_str.lower() or "timeout" in err_str.lower()):
-                log_failure("OCR Retry", f"Engine {engine_code} timed out → retrying Engine 1")
-                return perform_ocr(raw_bytes, language_code, 1, _retry=False)
+                log_failure("OCR Retry", f"Engine {safe_engine} timed out → retrying Engine 1")
+                return perform_ocr(raw_bytes, language_code, 1,
+                                   is_pdf=is_pdf, _retry=False)
             log_failure("OCR Processing", err_str)
             return {"error": err_str}
 
@@ -672,8 +699,9 @@ def perform_ocr(raw_bytes: bytes, language_code: str, engine_code: int,
     except requests.Timeout:
         if _retry:
             log_failure("OCR Retry", "Request timed out → retrying with Engine 1")
-            return perform_ocr(raw_bytes, language_code, 1, _retry=False)
-        msg = "OCR timed out even after retry. Try better lighting or Engine 1."
+            return perform_ocr(raw_bytes, language_code, 1,
+                               is_pdf=is_pdf, _retry=False)
+        msg = "OCR timed out even after retry. Try Engine 1 or a smaller file."
         log_failure("OCR Timeout", msg)
         return {"error": msg}
     except requests.HTTPError as e:
@@ -1209,7 +1237,7 @@ languages = {
     "Italian": "ita", "Chinese (Simplified)": "chs", "Chinese (Traditional)": "cht",
 }
 engine_options = {
-    "Engine 1 (Fast)": 1, "Engine 2 (Better)": 2, "Engine 3 (Best - Handwriting)": 3
+    "Engine 1 (Fast)": 1, "Engine 2 (Better)": 2, "Engine 3 (Best - Handwriting, Images Only)": 3
 }
 with col1:
     selected_language = st.selectbox("🌍 Language", list(languages.keys()))
@@ -1370,6 +1398,8 @@ if mode == "Document" and st.session_state.get("sample_text"):
                                           file_size_bytes=len(_stext.encode()))
         if saved:
             st.success("✅ Saved to your account.")
+        elif save_err == "duplicate":
+            st.info("ℹ️ This document is already saved in your account.")
         else:
             st.warning(f"⚠️ Could not save: {save_err}")
 
@@ -1415,11 +1445,18 @@ if uploaded_file and st.button("🚀 Extract Text", use_container_width=True):
 
     file_type = get_file_type(uploaded_file)
     file_name = getattr(uploaded_file, "name", "camera_capture.jpg")
+    is_pdf    = file_type == "application/pdf" or file_name.lower().endswith(".pdf")
+
+    # ── PDF: warn if Engine 3 selected ──
+    if is_pdf and engine_code == 3:
+        st.warning("⚠️ Engine 3 (Handwriting) doesn't support PDFs — automatically using Engine 2.")
 
     # ── Step 2: Show preview ──
     if file_type.startswith("image"):
         st.image(io.BytesIO(raw_bytes), use_container_width=True,
                  caption=f"📄 {file_name}  ·  {round(len(raw_bytes)/1024, 1)} KB (original)")
+    elif is_pdf:
+        st.info(f"📄 PDF uploaded: **{file_name}**  ·  {round(len(raw_bytes)/1024, 1)} KB")
 
     # ── Step 3: Blur check ──
     if file_type.startswith("image"):
@@ -1448,9 +1485,9 @@ if uploaded_file and st.button("🚀 Extract Text", use_container_width=True):
     elif not file_type.startswith("image"):
         st.session_state.pop("doc_photo", None)
 
-    # ── Step 5: Run OCR — pass raw bytes directly ──
-    with st.spinner("🗜️ Compressing & extracting text..."):
-        result = perform_ocr(raw_bytes, language_code, engine_code)
+    # ── Step 5: Run OCR — pass raw bytes + is_pdf flag ──
+    with st.spinner("🗜️ Compressing & extracting text..." if not is_pdf else "📄 Sending PDF to OCR..."):
+        result = perform_ocr(raw_bytes, language_code, engine_code, is_pdf=is_pdf)
 
     # Clear stored camera photo after extraction
     st.session_state.camera_bytes = None
@@ -1573,6 +1610,8 @@ if uploaded_file and st.button("🚀 Extract Text", use_container_width=True):
                     file_size_bytes=len(raw_bytes))
                 if saved:
                     st.success("✅ Extraction saved to your account.")
+                elif save_err == "duplicate":
+                    st.info("ℹ️ This document is already saved in your account — no duplicate created.")
                 else:
                     st.warning(f"⚠️ Could not save: {save_err}")
 
