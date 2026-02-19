@@ -470,20 +470,43 @@ def detect_blur(file) -> float:
         return 999
 
 
-def preprocess_image(file) -> io.BytesIO:
+def preprocess_image(file, max_width: int = 1200) -> io.BytesIO:
+    """
+    Resize + enhance + compress image.
+    Camera photos from phones can be 3-8 MB; OCR.space free tier times out
+    on anything over ~500 KB. We target <300 KB aggressively.
+    """
     try:
         file.seek(0)
-        image = Image.open(file).convert("L")
-        max_width = 1000
+        image = Image.open(file).convert("L")  # greyscale shrinks size a lot
+
+        # Resize: cap at max_width (1200px is plenty for OCR)
         if image.width > max_width:
             ratio = max_width / image.width
-            image = image.resize((max_width, int(image.height * ratio)))
-        image = ImageEnhance.Contrast(image).enhance(1.4)
-        image = ImageEnhance.Sharpness(image).enhance(1.4)
-        img_bytes = io.BytesIO()
-        image.save(img_bytes, format="JPEG", quality=65, optimize=True)
-        img_bytes.seek(0)
-        return img_bytes
+            new_h = int(image.height * ratio)
+            image = image.resize((max_width, new_h), Image.LANCZOS)
+
+        # Enhance for OCR readability
+        image = ImageEnhance.Contrast(image).enhance(1.5)
+        image = ImageEnhance.Sharpness(image).enhance(1.5)
+
+        # Compress: try quality levels until under 300 KB
+        target_bytes = 300 * 1024  # 300 KB
+        for quality in [60, 45, 30, 20]:
+            buf = io.BytesIO()
+            image.save(buf, format="JPEG", quality=quality, optimize=True)
+            size = buf.tell()
+            if size <= target_bytes:
+                buf.seek(0)
+                log_failure("Preprocess Info", f"Compressed to {round(size/1024)}KB at quality={quality}") if quality < 45 else None
+                return buf
+            # If still too big at quality=20, just return it anyway
+            if quality == 20:
+                buf.seek(0)
+                return buf
+
+        buf.seek(0)
+        return buf
     except Exception as e:
         log_failure("Image Preprocessing", str(e))
         file.seek(0)
@@ -570,29 +593,87 @@ def photo_html(b64, name="", doc_type=""):
     </div>"""
 
 
-def perform_ocr(file, language_code, engine_code):
+def compress_image_bytes(raw_bytes: bytes) -> bytes:
+    """
+    Takes raw image bytes, returns compressed JPEG bytes <300 KB.
+    Works entirely on bytes — no file pointer issues possible.
+    Phone camera JPEGs are 3-8 MB; OCR.space free tier times out on large files.
+    Greyscale + resize + quality reduction brings them to <200 KB reliably.
+    """
+    try:
+        img = Image.open(io.BytesIO(raw_bytes)).convert("L")  # greyscale = 3x smaller
+
+        # Resize: 1200px wide is plenty for OCR accuracy
+        max_w = 1200
+        if img.width > max_w:
+            img = img.resize((max_w, int(img.height * max_w / img.width)), Image.LANCZOS)
+
+        # Enhance contrast/sharpness to help OCR
+        img = ImageEnhance.Contrast(img).enhance(1.5)
+        img = ImageEnhance.Sharpness(img).enhance(1.4)
+
+        # Try quality levels until under 280 KB
+        target = 280 * 1024
+        for quality in [75, 60, 45, 30, 20]:
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=quality, optimize=True)
+            result_bytes = buf.getvalue()
+            if len(result_bytes) <= target or quality == 20:
+                return result_bytes
+
+        return buf.getvalue()  # fallback: whatever we got at quality=20
+    except Exception as e:
+        log_failure("Compress Image", str(e))
+        return raw_bytes  # send original if compression fails
+
+
+def perform_ocr(raw_bytes: bytes, language_code: str, engine_code: int,
+                _retry: bool = True) -> dict:
+    """
+    Takes raw image bytes (not a file handle) — eliminates all seek/pointer bugs.
+    Compresses first, sends to OCR.space, retries with Engine 1 on timeout.
+    """
     if not OCR_API_KEY:
         err = "Missing OCR_API_KEY"
         log_failure("OCR API", err)
         return {"error": err}
     try:
-        file.seek(0)
+        # Always compress — the single biggest fix for timeout errors
+        compressed_bytes = compress_image_bytes(raw_bytes)
+        kb = round(len(compressed_bytes) / 1024, 1)
+
         response = requests.post(
             OCR_URL,
-            data={"apikey": OCR_API_KEY, "language": language_code, "OCREngine": engine_code},
-            files={"file": ("image.jpg", file.read(), "image/jpeg")},
-            timeout=120,
+            data={
+                "apikey":            OCR_API_KEY,
+                "language":          language_code,
+                "OCREngine":         engine_code,
+                "isOverlayRequired": False,   # faster — we don't need overlay
+                "detectOrientation": True,    # handles rotated phone photos
+                "scale":             True,    # OCR.space upscales internally
+            },
+            files={"file": ("image.jpg", compressed_bytes, "image/jpeg")},
+            timeout=90,
         )
         response.raise_for_status()
         result = response.json()
+
         if result.get("IsErroredOnProcessing"):
             err_msgs = result.get("ErrorMessage", ["Unknown OCR error"])
-            err_str = "; ".join(err_msgs) if isinstance(err_msgs, list) else str(err_msgs)
+            err_str  = "; ".join(err_msgs) if isinstance(err_msgs, list) else str(err_msgs)
+            if _retry and ("timed out" in err_str.lower() or "timeout" in err_str.lower()):
+                log_failure("OCR Retry", f"Engine {engine_code} timed out → retrying Engine 1")
+                return perform_ocr(raw_bytes, language_code, 1, _retry=False)
             log_failure("OCR Processing", err_str)
             return {"error": err_str}
+
         return result
+
     except requests.Timeout:
-        msg = "OCR request timed out. Try smaller image or Engine 2."
+        if _retry:
+            log_failure("OCR Retry", "Request timed out → retrying with Engine 1")
+            return perform_ocr(raw_bytes, language_code, 1, _retry=False)
+        msg = "OCR timed out even after retry. Try better lighting or Engine 1."
         log_failure("OCR Timeout", msg)
         return {"error": msg}
     except requests.HTTPError as e:
@@ -1315,58 +1396,63 @@ if mode == "Document" and st.session_state.get("sample_text"):
     st.divider()
 
 # ================================================================
-# 15. LIVE OCR  (camera + upload both fixed)
+# 15. LIVE OCR  — fully bytes-based, no file pointer bugs
 # ================================================================
 if uploaded_file and st.button("🚀 Extract Text", use_container_width=True):
 
-    # ── Safe type detection (fixes camera capture silently skipping) ──
+    # ── Step 1: Read ALL bytes from the file/BytesIO right now ──
+    # Do this ONCE, immediately. Everything else works from `raw_bytes`.
+    try:
+        uploaded_file.seek(0)
+        raw_bytes = uploaded_file.read()
+    except Exception as e:
+        st.error(f"❌ Could not read file: {e}")
+        st.stop()
+
+    if not raw_bytes:
+        st.error("❌ File is empty. Please retake the photo or re-upload.")
+        st.stop()
+
     file_type = get_file_type(uploaded_file)
+    file_name = getattr(uploaded_file, "name", "camera_capture.jpg")
 
-    processed_file = uploaded_file
-
+    # ── Step 2: Show preview ──
     if file_type.startswith("image"):
-        # Reset before displaying
-        uploaded_file.seek(0)
-        st.image(uploaded_file, use_container_width=True)
+        st.image(io.BytesIO(raw_bytes), use_container_width=True,
+                 caption=f"📄 {file_name}  ·  {round(len(raw_bytes)/1024, 1)} KB (original)")
 
-        # Reset before blur detection
-        uploaded_file.seek(0)
-        blur_score = detect_blur(uploaded_file)
+    # ── Step 3: Blur check ──
+    if file_type.startswith("image"):
+        blur_file = io.BytesIO(raw_bytes)
+        blur_score = detect_blur(blur_file)
 
         if blur_score < 60:
             msg = f"Image too blurry (Sharpness: {round(blur_score, 2)})"
             log_failure("Blur Check", msg)
-            st.error(f"⚠ {msg}. Upload a clearer image.")
+            st.error(f"⚠ {msg}. Please retake with better lighting.")
             st.stop()
         elif blur_score < 120:
-            st.warning(f"Image slightly soft (Sharpness: {round(blur_score, 2)}). Enhancing...")
-            uploaded_file.seek(0)
-            processed_file = preprocess_image(uploaded_file)
+            st.warning(f"Image slightly soft (Sharpness: {round(blur_score, 2)}). Will enhance.")
         else:
-            st.success(f"Image sharp (Sharpness: {round(blur_score, 2)}).")
+            st.success(f"✅ Image sharp (Sharpness: {round(blur_score, 2)}).")
 
-        if mode == "Document":
-            with st.spinner("📸 Detecting photo..."):
-                # Always reset original file before face extraction
-                uploaded_file.seek(0)
-                photo_b64 = extract_face_photo(uploaded_file)
-            if photo_b64:
-                st.session_state["doc_photo"] = photo_b64
-                st.toast("✅ Photo extracted from document", icon="📸")
-            else:
-                st.session_state.pop("doc_photo", None)
-    else:
+    # ── Step 4: Face photo extraction (Document Mode) ──
+    if file_type.startswith("image") and mode == "Document":
+        with st.spinner("📸 Detecting photo..."):
+            photo_b64 = extract_face_photo(io.BytesIO(raw_bytes))
+        if photo_b64:
+            st.session_state["doc_photo"] = photo_b64
+            st.toast("✅ Photo extracted from document", icon="📸")
+        else:
+            st.session_state.pop("doc_photo", None)
+    elif not file_type.startswith("image"):
         st.session_state.pop("doc_photo", None)
 
-    # Always reset pointer before sending to OCR API
-    with st.spinner("🔍 Processing OCR..."):
-        try:
-            processed_file.seek(0)
-        except Exception:
-            pass
-        result = perform_ocr(processed_file, language_code, engine_code)
+    # ── Step 5: Run OCR — pass raw bytes directly ──
+    with st.spinner("🗜️ Compressing & extracting text..."):
+        result = perform_ocr(raw_bytes, language_code, engine_code)
 
-    # Clear stored camera photo after extraction attempt
+    # Clear stored camera photo after extraction
     st.session_state.camera_bytes = None
     st.session_state.camera_fsize = 0
 
@@ -1483,8 +1569,8 @@ if uploaded_file and st.button("🚀 Extract Text", use_container_width=True):
 
                 saved, save_err = save_extraction(
                     doc_type, fields, combined_text,
-                    file_name=getattr(uploaded_file, "name", "camera_capture.jpg"),
-                    file_size_bytes=_fsize)
+                    file_name=file_name,
+                    file_size_bytes=len(raw_bytes))
                 if saved:
                     st.success("✅ Extraction saved to your account.")
                 else:
