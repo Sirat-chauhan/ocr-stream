@@ -5,6 +5,7 @@ A full-featured OCR-based document extraction system built with Streamlit and Su
 
 This application extracts structured data from multiple Indian government ID documents and securely stores both images and extracted data with user-level isolation.
 
+LIVE DEMO=https://ocr-stream-nhjd5pbhtxcm99hfgncbre.streamlit.app/
 ---
 
 # 🚀 Features
