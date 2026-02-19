@@ -296,6 +296,11 @@ if "failure_log" not in st.session_state:
     st.session_state.failure_log = []
 if "ocr_mode" not in st.session_state:
     st.session_state.ocr_mode = "Normal"
+# Camera: store raw bytes so they survive button-click reruns
+if "camera_bytes" not in st.session_state:
+    st.session_state.camera_bytes = None
+if "camera_fsize" not in st.session_state:
+    st.session_state.camera_fsize = 0
 
 # ================================================================
 # 5. ALL FUNCTION DEFINITIONS
@@ -1160,6 +1165,9 @@ with input_tab1:
         else:
             uploaded_file = _uf
             _fsize        = _sz
+            # Clear any stored camera photo so upload takes priority
+            st.session_state.camera_bytes = None
+            st.session_state.camera_fsize = 0
             st.caption(f"📦 {_uf.name}  ·  {round(_sz/1024,1)} KB")
 
 with input_tab2:
@@ -1175,26 +1183,50 @@ with input_tab2:
     with col_cam2:
         if st.button("✖ Close Camera", use_container_width=True, key="btn_close_cam"):
             st.session_state.camera_open = False
+            st.session_state.camera_bytes = None
+            st.session_state.camera_fsize = 0
 
     camera_image = None
     if st.session_state.camera_open:
         camera_image = st.camera_input("Take a photo of your document")
 
+    # ── KEY FIX: persist camera bytes into session_state immediately ──
+    # st.camera_input returns None on every rerun EXCEPT the one where
+    # the user just snapped the photo. We must save bytes right then.
     if camera_image is not None:
         camera_image.seek(0, 2)
         _csz = camera_image.tell()
         camera_image.seek(0)
         if _csz > MAX_FILE_BYTES:
             st.error(f"❌ Camera capture too large ({round(_csz/1024/1024,2)} MB).")
+            st.session_state.camera_bytes = None
+            st.session_state.camera_fsize = 0
         else:
-            # Ensure camera file has proper name and type attributes
-            camera_image.name = "camera_capture.jpg"
-            if not hasattr(camera_image, "type") or not camera_image.type:
-                camera_image.type = "image/jpeg"
-            uploaded_file = camera_image
-            _fsize        = _csz
-            st.session_state.camera_open = False
-            st.caption(f"📷 Camera capture  ·  {round(_csz/1024,1)} KB")
+            # Save raw bytes — survives all subsequent reruns
+            st.session_state.camera_bytes = camera_image.read()
+            st.session_state.camera_fsize = _csz
+            st.session_state.camera_open  = False  # auto-close camera
+
+    # ── Restore camera file from session_state for upload/extract ──
+    if st.session_state.camera_bytes:
+        cam_buf = io.BytesIO(st.session_state.camera_bytes)
+        cam_buf.name = "camera_capture.jpg"
+        cam_buf.type = "image/jpeg"
+        cam_buf.seek(0)
+
+        # Only use camera file if no file was uploaded in tab1
+        if uploaded_file is None:
+            uploaded_file = cam_buf
+            _fsize        = st.session_state.camera_fsize
+
+        # Show preview + clear button
+        preview_buf = io.BytesIO(st.session_state.camera_bytes)
+        st.image(preview_buf, caption="📷 Captured photo (ready to extract)", use_container_width=True)
+        if st.button("🗑 Clear Camera Photo", key="btn_clear_cam"):
+            st.session_state.camera_bytes = None
+            st.session_state.camera_fsize = 0
+            st.rerun()
+        st.caption(f"📷 camera_capture.jpg  ·  {round(st.session_state.camera_fsize/1024, 1)} KB")
 
 # ================================================================
 # 13. SAMPLE BUTTONS (Document Mode only)
@@ -1333,6 +1365,10 @@ if uploaded_file and st.button("🚀 Extract Text", use_container_width=True):
         except Exception:
             pass
         result = perform_ocr(processed_file, language_code, engine_code)
+
+    # Clear stored camera photo after extraction attempt
+    st.session_state.camera_bytes = None
+    st.session_state.camera_fsize = 0
 
     st.divider()
 
