@@ -387,14 +387,18 @@ def load_extractions():
         return []
     try:
         supabase.postgrest.auth(st.session_state.access_token)
-        res = supabase.table("extractions")             .select("*")             .eq("user_id", st.session_state.user.id)             .order("created_at", desc=True)             .execute()
+        res = (supabase.table("extractions")
+               .select("*")
+               .eq("user_id", st.session_state.user.id)
+               .order("created_at", desc=True)
+               .execute())
         return res.data or []
     except Exception as e:
         log_failure("Supabase Fetch", str(e))
         return []
 
 
-# ── Auth UI (defined after auth helpers it calls) ─────────────────
+# ── Auth UI ───────────────────────────────────────────────────────
 def render_auth_ui():
     st.markdown("""
     <div class="ocr-header">
@@ -428,7 +432,27 @@ def render_auth_ui():
 
 
 # ── OCR / Image helpers ───────────────────────────────────────────
-def detect_blur(file):
+
+def get_file_type(f) -> str:
+    """
+    Safely get MIME type — works for both st.file_uploader and st.camera_input objects.
+    Camera captures sometimes have an unreliable or missing .type attribute.
+    """
+    try:
+        t = getattr(f, "type", None)
+        if t and isinstance(t, str) and t.strip():
+            return t.strip()
+        # Fallback: infer from file name
+        name = getattr(f, "name", "") or ""
+        if name.lower().endswith(".pdf"):
+            return "application/pdf"
+        # Camera captures are always JPEG
+        return "image/jpeg"
+    except Exception:
+        return "image/jpeg"
+
+
+def detect_blur(file) -> float:
     try:
         file.seek(0)
         image = Image.open(file).convert("L")
@@ -440,7 +464,8 @@ def detect_blur(file):
         log_failure("Blur Detection", str(e))
         return 999
 
-def preprocess_image(file):
+
+def preprocess_image(file) -> io.BytesIO:
     try:
         file.seek(0)
         image = Image.open(file).convert("L")
@@ -458,6 +483,7 @@ def preprocess_image(file):
         log_failure("Image Preprocessing", str(e))
         file.seek(0)
         return file
+
 
 def extract_face_photo(file):
     try:
@@ -512,6 +538,7 @@ def extract_face_photo(file):
         log_failure("Face Extraction", str(e))
         return None
 
+
 def photo_html(b64, name="", doc_type=""):
     if b64:
         photo_div = f'<div class="photo-frame"><img src="data:image/jpeg;base64,{b64}" alt="Photo"/></div>'
@@ -536,6 +563,7 @@ def photo_html(b64, name="", doc_type=""):
             {sub_html}
         </div>
     </div>"""
+
 
 def perform_ocr(file, language_code, engine_code):
     if not OCR_API_KEY:
@@ -601,7 +629,7 @@ def detect_doc_type(text: str) -> str:
     aadhaar_pattern = re.search(r'\b\d{4}[\s\-]\d{4}[\s\-]\d{4}\b|\b\d{12}\b', text)
     masked_pattern  = re.search(r'\bXXXX\s*XXXX\s*\d{4}\b', text, re.IGNORECASE)
     dl_pattern      = re.search(r'\b[A-Z]{2}[\s\-]?\d{2}[\s\-]?\d{11}\b|\b[A-Z]{2}\d{13}\b', text)
-    epic_pattern    = re.search(r'\b[A-Z]{3}\d{7}\b', text)  # EPIC number format
+    epic_pattern    = re.search(r'\b[A-Z]{3}\d{7}\b', text)
 
     if masked_pattern:
         aadhaar_pattern = masked_pattern
@@ -846,13 +874,11 @@ def extract_pan_fields(text: str) -> dict:
     return fields
 
 def extract_dl_fields(text: str) -> dict:
-    """Extract key fields from Driving Licence OCR text."""
     fields = {}
     text  = clean_ocr_text(text)
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     full  = text
 
-    # DL Number: e.g. MH-1234567890123 or MH12 20190012345
     dl_m = re.search(r'\b([A-Z]{2})[\s\-]?(\d{2})[\s\-]?(\d{4})[\s\-]?(\d{7})\b', full)
     if dl_m:
         fields["DL Number"] = f"{dl_m.group(1)}-{dl_m.group(2)}-{dl_m.group(3)}-{dl_m.group(4)}"
@@ -861,7 +887,6 @@ def extract_dl_fields(text: str) -> dict:
         if dl_m2:
             fields["DL Number"] = dl_m2.group(1)
 
-    # Name
     for pat in [r'(?:name|naam|नाम)\s*[:\-]\s*([A-Za-z][A-Za-z\s\.]{2,40})',
                 r's[/\\]o\s+([A-Za-z][A-Za-z\s\.]{2,40})']:
         m = re.search(pat, full, re.IGNORECASE)
@@ -871,7 +896,6 @@ def extract_dl_fields(text: str) -> dict:
                 fields["Name"] = candidate.title()
                 break
 
-    # DOB
     dob_m = re.search(r'(?:dob|date\s*of\s*birth|जन्म)\s*[:\-]?\s*(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})', full, re.IGNORECASE)
     if dob_m:
         fields["Date of Birth"] = dob_m.group(1)
@@ -880,22 +904,18 @@ def extract_dl_fields(text: str) -> dict:
         if dob_m2:
             fields["Date of Birth"] = dob_m2.group(1)
 
-    # Valid Till / Expiry
     exp_m = re.search(r'(?:valid\s*till|validity|expiry|exp\s*date|valid\s*upto)\s*[:\-]?\s*(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})', full, re.IGNORECASE)
     if exp_m:
         fields["Valid Till"] = exp_m.group(1)
 
-    # Vehicle Class (COV)
     cov_m = re.search(r'(?:cov|class\s*of\s*vehicle|vehicle\s*class|authorisation)\s*[:\-]?\s*([A-Z0-9,/\s]{2,30})', full, re.IGNORECASE)
     if cov_m:
         fields["Vehicle Class"] = cov_m.group(1).strip()[:50]
 
-    # Blood Group
     bg_m = re.search(r'\b(A|B|AB|O)[\+\-]\b', full)
     if bg_m:
         fields["Blood Group"] = bg_m.group(0)
 
-    # Address
     addr_m = re.search(r'(?:address|पता)\s*[:\-]?\s*(.+)', full, re.IGNORECASE | re.DOTALL)
     if addr_m:
         addr = addr_m.group(1)
@@ -904,7 +924,6 @@ def extract_dl_fields(text: str) -> dict:
         if len(addr_clean) > 8:
             fields["Address"] = addr_clean
 
-    # Issuing RTO
     rto_m = re.search(r'(?:licensing\s*authority|issued\s*by|rto|issuing\s*authority)\s*[:\-]?\s*([A-Za-z\s,\.]{4,50})', full, re.IGNORECASE)
     if rto_m:
         fields["Issuing Authority"] = rto_m.group(1).strip()
@@ -913,18 +932,15 @@ def extract_dl_fields(text: str) -> dict:
 
 
 def extract_voter_fields(text: str) -> dict:
-    """Extract key fields from Voter ID (EPIC) card OCR text."""
     fields = {}
     text  = clean_ocr_text(text)
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     full  = text
 
-    # EPIC Number: 3 letters + 7 digits
     epic_m = re.search(r'\b([A-Z]{3}\d{7})\b', full)
     if epic_m:
         fields["EPIC Number"] = epic_m.group(1)
 
-    # Name
     for pat in [r'(?:elector\s*name|name\s*of\s*elector|नाम|name)\s*[:\-]\s*([A-Za-z][A-Za-z\s\.]{2,40})']:
         m = re.search(pat, full, re.IGNORECASE)
         if m:
@@ -933,14 +949,12 @@ def extract_voter_fields(text: str) -> dict:
                 fields["Name"] = candidate.title()
                 break
 
-    # Father's / Husband's Name
     rel_m = re.search(r'(?:father|husband|पिता|पति)\s*(?:name|का नाम)?\s*[:\-/]?\s*([A-Za-z][A-Za-z\s\.]{2,40})', full, re.IGNORECASE)
     if rel_m:
         candidate = re.sub(r'[^A-Za-z\s\.]', '', rel_m.group(1)).strip()
         if len(candidate) >= 4:
             fields["Father/Husband Name"] = candidate.title()
 
-    # DOB / Age
     dob_m = re.search(r'(?:date\s*of\s*birth|dob|जन्म\s*तिथि)\s*[:\-]?\s*(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})', full, re.IGNORECASE)
     if dob_m:
         fields["Date of Birth"] = dob_m.group(1)
@@ -949,14 +963,12 @@ def extract_voter_fields(text: str) -> dict:
         if age_m:
             fields["Age"] = age_m.group(1)
 
-    # Gender
     gender_map = {'male':'Male','female':'Female','पुरुष':'Male','महिला':'Female'}
     for token, label in gender_map.items():
         if re.search(r'\b' + re.escape(token) + r'\b', full, re.IGNORECASE):
             fields["Gender"] = label
             break
 
-    # Address
     addr_m = re.search(r'(?:address|पता|house|flat)\s*[:\-]?\s*(.+)', full, re.IGNORECASE | re.DOTALL)
     if addr_m:
         addr = addr_m.group(1)
@@ -965,12 +977,10 @@ def extract_voter_fields(text: str) -> dict:
         if len(addr_clean) > 8:
             fields["Address"] = addr_clean
 
-    # Constituency
     const_m = re.search(r'(?:assembly\s*constituency|parliamentary\s*constituency|विधान\s*सभा)\s*[:\-]?\s*([A-Za-z\s]{3,50})', full, re.IGNORECASE)
     if const_m:
         fields["Constituency"] = const_m.group(1).strip()
 
-    # Part / Serial No
     part_m = re.search(r'part\s*(?:no\.?|number)\s*[:\-]?\s*(\d+)', full, re.IGNORECASE)
     if part_m:
         fields["Part No"] = part_m.group(1)
@@ -1000,7 +1010,7 @@ def confidence_bar(score, label="Confidence"):
 
 
 # ================================================================
-# 6. AUTH GATE  ← first executable UI after all defs
+# 6. AUTH GATE
 # ================================================================
 if not st.session_state.user:
     render_auth_ui()
@@ -1058,8 +1068,8 @@ BORUGULA MUNASWAMY
 जन्म की तारीख / Date of Birth
 06/03/1992"""
 
-SAMPLE_AADHAAR_PHOTO_B64 = "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"
-SAMPLE_PAN_PHOTO_B64 = "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"
+SAMPLE_AADHAAR_PHOTO_B64 = "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"
+SAMPLE_PAN_PHOTO_B64 = "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"
 
 # ================================================================
 # 9. MAIN APP HEADER
@@ -1177,11 +1187,15 @@ with input_tab2:
         if _csz > MAX_FILE_BYTES:
             st.error(f"❌ Camera capture too large ({round(_csz/1024/1024,2)} MB).")
         else:
+            # Ensure camera file has proper name and type attributes
             camera_image.name = "camera_capture.jpg"
+            if not hasattr(camera_image, "type") or not camera_image.type:
+                camera_image.type = "image/jpeg"
             uploaded_file = camera_image
             _fsize        = _csz
-            st.session_state.camera_open = False  # auto-close after capture
+            st.session_state.camera_open = False
             st.caption(f"📷 Camera capture  ·  {round(_csz/1024,1)} KB")
+
 # ================================================================
 # 13. SAMPLE BUTTONS (Document Mode only)
 # ================================================================
@@ -1238,7 +1252,9 @@ if mode == "Document" and st.session_state.get("sample_text"):
         _conf = min(len(_fields) / _exp, 1.0)
         st.markdown(confidence_bar(_conf, "Extraction Confidence"), unsafe_allow_html=True)
 
-        saved, save_err = save_extraction(_stype, _fields, _stext, file_name='sample_'+_stype, file_size_bytes=len(_stext.encode()))
+        saved, save_err = save_extraction(_stype, _fields, _stext,
+                                          file_name='sample_' + _stype,
+                                          file_size_bytes=len(_stext.encode()))
         if saved:
             st.success("✅ Saved to your account.")
         else:
@@ -1267,28 +1283,40 @@ if mode == "Document" and st.session_state.get("sample_text"):
     st.divider()
 
 # ================================================================
-# 15. LIVE OCR
+# 15. LIVE OCR  (camera + upload both fixed)
 # ================================================================
 if uploaded_file and st.button("🚀 Extract Text", use_container_width=True):
+
+    # ── Safe type detection (fixes camera capture silently skipping) ──
+    file_type = get_file_type(uploaded_file)
+
     processed_file = uploaded_file
 
-    if uploaded_file.type.startswith("image"):
+    if file_type.startswith("image"):
+        # Reset before displaying
+        uploaded_file.seek(0)
         st.image(uploaded_file, use_container_width=True)
+
+        # Reset before blur detection
+        uploaded_file.seek(0)
         blur_score = detect_blur(uploaded_file)
 
         if blur_score < 60:
-            msg = f"Image too blurry (Sharpness: {round(blur_score,2)})"
+            msg = f"Image too blurry (Sharpness: {round(blur_score, 2)})"
             log_failure("Blur Check", msg)
             st.error(f"⚠ {msg}. Upload a clearer image.")
             st.stop()
         elif blur_score < 120:
-            st.warning(f"Image slightly soft (Sharpness: {round(blur_score,2)}). Enhancing...")
+            st.warning(f"Image slightly soft (Sharpness: {round(blur_score, 2)}). Enhancing...")
+            uploaded_file.seek(0)
             processed_file = preprocess_image(uploaded_file)
         else:
-            st.success(f"Image sharp (Sharpness: {round(blur_score,2)}).")
+            st.success(f"Image sharp (Sharpness: {round(blur_score, 2)}).")
 
         if mode == "Document":
             with st.spinner("📸 Detecting photo..."):
+                # Always reset original file before face extraction
+                uploaded_file.seek(0)
                 photo_b64 = extract_face_photo(uploaded_file)
             if photo_b64:
                 st.session_state["doc_photo"] = photo_b64
@@ -1298,7 +1326,12 @@ if uploaded_file and st.button("🚀 Extract Text", use_container_width=True):
     else:
         st.session_state.pop("doc_photo", None)
 
+    # Always reset pointer before sending to OCR API
     with st.spinner("🔍 Processing OCR..."):
+        try:
+            processed_file.seek(0)
+        except Exception:
+            pass
         result = perform_ocr(processed_file, language_code, engine_code)
 
     st.divider()
@@ -1356,9 +1389,11 @@ if uploaded_file and st.button("🚀 Extract Text", use_container_width=True):
             combined_text = "\n".join(pr.get("ParsedText", "") for pr in parsed_results)
             doc_type  = detect_doc_type(combined_text)
             doc_label = {"aadhaar": "Aadhaar Card", "pan": "PAN Card",
-                         "dl": "Driving Licence", "voter": "Voter ID", "unknown": "Unknown Document"}[doc_type]
+                         "dl": "Driving Licence", "voter": "Voter ID",
+                         "unknown": "Unknown Document"}[doc_type]
             badge_cls = {"aadhaar": "badge-aadhaar", "pan": "badge-pan",
-                         "dl": "badge-dl", "voter": "badge-voter", "unknown": "badge-unknown"}[doc_type]
+                         "dl": "badge-dl", "voter": "badge-voter",
+                         "unknown": "badge-unknown"}[doc_type]
 
             st.markdown(f"""
             <div class="info-card">
@@ -1374,8 +1409,9 @@ if uploaded_file and st.button("🚀 Extract Text", use_container_width=True):
             </div>""", unsafe_allow_html=True)
 
             if doc_type == "unknown":
-                log_failure("Document Detection", f"Could not identify document type (length={len(combined_text)})")
-                st.warning("⚠️ Could not detect Aadhaar or PAN. Check failure log below.")
+                log_failure("Document Detection",
+                            f"Could not identify document type (length={len(combined_text)})")
+                st.warning("⚠️ Could not detect document type. Check failure log below.")
 
             if doc_type == "aadhaar":
                 fields = extract_aadhaar_fields(combined_text)
@@ -1394,12 +1430,13 @@ if uploaded_file and st.button("🚀 Extract Text", use_container_width=True):
             if photo_b64:
                 st.download_button("⬇ Download Photo",
                     data=base64.b64decode(photo_b64),
-                    file_name=f"{doc_type}_photo_{holder_name.replace(' ','_') or 'person'}.jpg",
+                    file_name=f"{doc_type}_photo_{holder_name.replace(' ', '_') or 'person'}.jpg",
                     mime="image/jpeg", key="photo_dl")
 
             if fields:
                 st.markdown('<div class="section-label">Extracted Fields</div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="info-card">{render_kv_table(fields)}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="info-card">{render_kv_table(fields)}</div>',
+                            unsafe_allow_html=True)
 
                 expected = {"aadhaar": 5, "pan": 4, "dl": 5, "voter": 5, "unknown": 1}.get(doc_type, 3)
                 conf     = min(len(fields) / expected, 1.0)
@@ -1408,9 +1445,10 @@ if uploaded_file and st.button("🚀 Extract Text", use_container_width=True):
                         f"Low confidence ({int(conf*100)}%): {len(fields)} of ~{expected} fields found")
                 st.markdown(confidence_bar(conf, "Extraction Confidence"), unsafe_allow_html=True)
 
-                saved, save_err = save_extraction(doc_type, fields, combined_text,
-                    file_name=getattr(uploaded_file,'name',''),
-                    file_size_bytes=_fsize if 'uploaded_file' in dir() else 0)
+                saved, save_err = save_extraction(
+                    doc_type, fields, combined_text,
+                    file_name=getattr(uploaded_file, "name", "camera_capture.jpg"),
+                    file_size_bytes=_fsize)
                 if saved:
                     st.success("✅ Extraction saved to your account.")
                 else:
@@ -1467,7 +1505,6 @@ with st.expander("🗂 My Saved Extractions", expanded=False):
             fsize  = r.get("file_size_kb") or ""
             rid    = r.get("id", "x")
 
-            # Rebuild clean display dict — only non-empty values
             if dtype == "aadhaar":
                 keys = [("Name",           "holder_name"),
                         ("Aadhaar Number", "aadhaar_number"),
