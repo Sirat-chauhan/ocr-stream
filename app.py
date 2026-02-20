@@ -1071,11 +1071,8 @@ with col_left:
 
     with input_tab2:
         st.info("📱 Works best on mobile. Point camera at document and capture.", icon="ℹ️")
-        st.markdown(
-            "<p style='margin:8px 0 6px;color:#0f172a;font-weight:700;'>Take Photo From Here</p>",
-            unsafe_allow_html=True
-        )
-        camera_image = st.camera_input("Take Photo From Here", label_visibility="visible")
+        st.caption("Use the camera below to capture the document.")
+        camera_image = st.camera_input("Take Photo", label_visibility="collapsed")
 
         if camera_image is not None:
             camera_image.seek(0, 2); _csz = camera_image.tell(); camera_image.seek(0)
