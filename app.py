@@ -306,6 +306,7 @@ supabase = get_supabase()
 for key, default in [
     ("user", None), ("access_token", None), ("failure_log", []),
     ("ocr_mode", "Normal"), ("camera_bytes", None), ("camera_fsize", 0),
+    ("camera_widget_nonce", 0),
     ("last_result", None),
     ("last_login", None),        
     ("user_created_at", None),   
@@ -1071,8 +1072,13 @@ with col_left:
 
     with input_tab2:
         st.info("📱 Works best on mobile. Point camera at document and capture.", icon="ℹ️")
-        st.caption("Use the camera below to capture the document.")
-        camera_image = st.camera_input("Take Photo", label_visibility="collapsed")
+        st.markdown(
+            "<p style='margin:8px 0 6px;color:#0f172a;font-weight:700;'>Take Photo</p>",
+            unsafe_allow_html=True
+        )
+        st.caption("Tap below to open camera and capture.")
+        cam_key = f"camera_input_{st.session_state.camera_widget_nonce}"
+        camera_image = st.camera_input("Take Photo", key=cam_key, label_visibility="visible")
 
         if camera_image is not None:
             camera_image.seek(0, 2); _csz = camera_image.tell(); camera_image.seek(0)
@@ -1094,6 +1100,8 @@ with col_left:
             st.image(preview_buf, use_container_width=True, caption=f"📷 {round(st.session_state.camera_fsize/1024,1)} KB")
             if st.button("🗑 Clear Photo", key="btn_clear_cam"):
                 st.session_state.camera_bytes = None
+                st.session_state.camera_fsize = 0
+                st.session_state.camera_widget_nonce += 1
                 st.rerun()
 
     # Extract button
