@@ -268,6 +268,17 @@ st.markdown("""
         color: #ffffff !important;
         fill: #ffffff !important;
     }
+    [data-testid="stCameraInput"] button[aria-label*="Switch"],
+    [data-testid="stCameraInput"] button[title*="Switch"],
+    [data-testid="stCameraInput"] button[aria-label*="camera"],
+    [data-testid="stCameraInput"] button[title*="camera"] {
+        background: rgba(15, 23, 42, 0.86) !important;
+        border: 2px solid #ffffff !important;
+        border-radius: 999px !important;
+        min-width: 42px !important;
+        min-height: 42px !important;
+        opacity: 1 !important;
+    }
 
     hr { border-color:#e8eaf0 !important; margin:16px 0 !important; }
     [data-testid="stCaptionContainer"] p { color:#4b5563 !important; font-family:'DM Mono',monospace !important; font-size:0.76rem !important; }
