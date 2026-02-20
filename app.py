@@ -258,6 +258,16 @@ st.markdown("""
     [data-testid="stSuccess"] { background:#ecfdf5 !important; border-color:#a7f3d0 !important; }
 
     [data-testid="stCameraInput"] { border:2px dashed #c7d2fe !important; border-radius:12px !important; background:#fafbff !important; }
+    [data-testid="stCameraInput"] button {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.45) !important;
+    }
+    [data-testid="stCameraInput"] button svg,
+    [data-testid="stCameraInput"] button * {
+        color: #ffffff !important;
+        fill: #ffffff !important;
+    }
 
     hr { border-color:#e8eaf0 !important; margin:16px 0 !important; }
     [data-testid="stCaptionContainer"] p { color:#4b5563 !important; font-family:'DM Mono',monospace !important; font-size:0.76rem !important; }
@@ -1089,20 +1099,8 @@ with col_left:
                 "<p style='margin:8px 0 6px;color:#0f172a;font-weight:700;'>Take Photo</p>",
                 unsafe_allow_html=True
             )
-            st.markdown(
-                """<div style="background:#fffbeb;border:1px solid #fcd34d;color:#92400e;
-                border-radius:8px;padding:8px 10px;margin:4px 0 8px;font-size:0.8rem;font-weight:700;">
-                ⬇ Capture button is at the bottom center inside the camera box.
-                Tap that bottom bar to take the photo.
-                </div>""",
-                unsafe_allow_html=True
-            )
             cam_key = f"camera_input_{st.session_state.camera_widget_nonce}"
             camera_image = st.camera_input("Take Photo", key=cam_key, label_visibility="visible")
-            st.markdown(
-                "<p style='margin:4px 0 8px;color:#334155;font-size:0.78rem;'>If the capture button is hard to see, increase screen brightness or rotate phone once.</p>",
-                unsafe_allow_html=True
-            )
         else:
             st.caption("Click `Open Camera` to show the take photo option.")
 
