@@ -317,6 +317,7 @@ for key, default in [
     ("user", None), ("access_token", None), ("failure_log", []),
     ("ocr_mode", "Normal"), ("camera_bytes", None), ("camera_fsize", 0),
     ("camera_open", False),
+    ("camera_fullscreen", False),
     ("camera_widget_nonce", 0),
     ("last_result", None),
     ("last_login", None),        
@@ -1083,7 +1084,7 @@ with col_left:
 
     with input_tab2:
         st.info("📱 Works best on mobile. Point camera at document and capture.", icon="ℹ️")
-        b1, b2 = st.columns(2)
+        b1, b2, b3 = st.columns(3)
         with b1:
             if st.button("📸 Open Camera", use_container_width=True, key="btn_open_camera"):
                 st.session_state.camera_open = True
@@ -1091,10 +1092,34 @@ with col_left:
         with b2:
             if st.button("✖ Close Camera", use_container_width=True, key="btn_close_camera"):
                 st.session_state.camera_open = False
+                st.session_state.camera_fullscreen = False
+                st.rerun()
+        with b3:
+            fs_label = "🗗 Exit Full" if st.session_state.camera_fullscreen else "⛶ Full Screen"
+            if st.button(fs_label, use_container_width=True, key="btn_camera_fullscreen"):
+                st.session_state.camera_fullscreen = not st.session_state.camera_fullscreen
                 st.rerun()
 
         camera_image = None
         if st.session_state.camera_open:
+            if st.session_state.camera_fullscreen:
+                st.markdown("""
+                <style>
+                    [data-testid="stCameraInput"] {
+                        position: fixed !important;
+                        inset: 0 !important;
+                        z-index: 9999 !important;
+                        background: #000000 !important;
+                        border: none !important;
+                        border-radius: 0 !important;
+                        padding: 10px !important;
+                        margin: 0 !important;
+                    }
+                    [data-testid="stCameraInput"] video {
+                        max-height: calc(100vh - 90px) !important;
+                    }
+                </style>
+                """, unsafe_allow_html=True)
             st.markdown(
                 "<p style='margin:8px 0 6px;color:#0f172a;font-weight:700;'>Take Photo</p>",
                 unsafe_allow_html=True
@@ -1112,6 +1137,7 @@ with col_left:
                 st.session_state.camera_bytes = camera_image.read()
                 st.session_state.camera_fsize = _csz
                 st.session_state.camera_open = False
+                st.session_state.camera_fullscreen = False
 
         if st.session_state.camera_bytes:
             cam_buf = io.BytesIO(st.session_state.camera_bytes)
@@ -1128,6 +1154,7 @@ with col_left:
                 st.session_state.camera_fsize = 0
                 st.session_state.camera_widget_nonce += 1
                 st.session_state.camera_open = False
+                st.session_state.camera_fullscreen = False
                 st.rerun()
 
     # Extract button
