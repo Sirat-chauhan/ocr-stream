@@ -1089,9 +1089,20 @@ with col_left:
                 "<p style='margin:8px 0 6px;color:#0f172a;font-weight:700;'>Take Photo</p>",
                 unsafe_allow_html=True
             )
-            st.caption("Tap the capture button shown under the camera preview.")
+            st.markdown(
+                """<div style="background:#fffbeb;border:1px solid #fcd34d;color:#92400e;
+                border-radius:8px;padding:8px 10px;margin:4px 0 8px;font-size:0.8rem;font-weight:700;">
+                ⬇ Capture button is at the bottom center inside the camera box.
+                Tap that bottom bar to take the photo.
+                </div>""",
+                unsafe_allow_html=True
+            )
             cam_key = f"camera_input_{st.session_state.camera_widget_nonce}"
             camera_image = st.camera_input("Take Photo", key=cam_key, label_visibility="visible")
+            st.markdown(
+                "<p style='margin:4px 0 8px;color:#334155;font-size:0.78rem;'>If the capture button is hard to see, increase screen brightness or rotate phone once.</p>",
+                unsafe_allow_html=True
+            )
         else:
             st.caption("Click `Open Camera` to show the take photo option.")
 
