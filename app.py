@@ -306,6 +306,7 @@ supabase = get_supabase()
 for key, default in [
     ("user", None), ("access_token", None), ("failure_log", []),
     ("ocr_mode", "Normal"), ("camera_bytes", None), ("camera_fsize", 0),
+    ("camera_open", False),
     ("camera_widget_nonce", 0),
     ("last_result", None),
     ("last_login", None),        
@@ -1072,13 +1073,27 @@ with col_left:
 
     with input_tab2:
         st.info("📱 Works best on mobile. Point camera at document and capture.", icon="ℹ️")
-        st.markdown(
-            "<p style='margin:8px 0 6px;color:#0f172a;font-weight:700;'>Take Photo</p>",
-            unsafe_allow_html=True
-        )
-        st.caption("Tap below to open camera and capture.")
-        cam_key = f"camera_input_{st.session_state.camera_widget_nonce}"
-        camera_image = st.camera_input("Take Photo", key=cam_key, label_visibility="visible")
+        b1, b2 = st.columns(2)
+        with b1:
+            if st.button("📸 Open Camera", use_container_width=True, key="btn_open_camera"):
+                st.session_state.camera_open = True
+                st.rerun()
+        with b2:
+            if st.button("✖ Close Camera", use_container_width=True, key="btn_close_camera"):
+                st.session_state.camera_open = False
+                st.rerun()
+
+        camera_image = None
+        if st.session_state.camera_open:
+            st.markdown(
+                "<p style='margin:8px 0 6px;color:#0f172a;font-weight:700;'>Take Photo</p>",
+                unsafe_allow_html=True
+            )
+            st.caption("Tap the capture button shown under the camera preview.")
+            cam_key = f"camera_input_{st.session_state.camera_widget_nonce}"
+            camera_image = st.camera_input("Take Photo", key=cam_key, label_visibility="visible")
+        else:
+            st.caption("Click `Open Camera` to show the take photo option.")
 
         if camera_image is not None:
             camera_image.seek(0, 2); _csz = camera_image.tell(); camera_image.seek(0)
@@ -1087,6 +1102,7 @@ with col_left:
             else:
                 st.session_state.camera_bytes = camera_image.read()
                 st.session_state.camera_fsize = _csz
+                st.session_state.camera_open = False
 
         if st.session_state.camera_bytes:
             cam_buf = io.BytesIO(st.session_state.camera_bytes)
@@ -1102,6 +1118,7 @@ with col_left:
                 st.session_state.camera_bytes = None
                 st.session_state.camera_fsize = 0
                 st.session_state.camera_widget_nonce += 1
+                st.session_state.camera_open = False
                 st.rerun()
 
     # Extract button
