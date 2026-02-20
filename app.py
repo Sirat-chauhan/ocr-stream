@@ -306,7 +306,9 @@ supabase = get_supabase()
 for key, default in [
     ("user", None), ("access_token", None), ("failure_log", []),
     ("ocr_mode", "Normal"), ("camera_bytes", None), ("camera_fsize", 0),
-    ("last_result", None),   # stores extracted result dict
+    ("last_result", None),
+    ("last_login", None),        
+    ("user_created_at", None),   
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -327,6 +329,24 @@ def auth_login(email, password):
         st.session_state.user = res.user
         st.session_state.access_token = res.session.access_token
         supabase.postgrest.auth(res.session.access_token)
+
+        # ── Update last_login in public.users (upsert, no duplicates) ──
+        try:
+            supabase.rpc("upsert_user_login", {
+                "p_user_id": res.user.id,
+                "p_email": res.user.email
+            }).execute()
+            # Fetch last_login to show in UI
+            user_row = (supabase.table("users")
+                        .select("last_login, created_at")
+                        .eq("id", res.user.id)
+                        .single().execute())
+            st.session_state.last_login = user_row.data.get("last_login") if user_row.data else None
+            st.session_state.user_created_at = user_row.data.get("created_at") if user_row.data else None
+        except Exception:
+            st.session_state.last_login = None
+            st.session_state.user_created_at = None
+
         return True, None
     except Exception as e:
         return False, str(e)
@@ -908,9 +928,19 @@ if not st.session_state.user:
 # ================================================================
 col_user, col_out = st.columns([6, 1])
 with col_user:
+    login_info = ""
+    if st.session_state.last_login:
+        try:
+            from datetime import timezone
+            import dateutil.parser
+            lt = dateutil.parser.parse(st.session_state.last_login)
+            login_info = f" · Last login: {lt.strftime('%d %b %Y, %I:%M %p')}"
+        except Exception:
+            login_info = ""
     st.markdown(
-        f"<p style='color:#6b7280;font-size:0.82rem;margin:4px 0;'>"
-        f"🔒 <b style='color:#4f46e5'>{st.session_state.user.email}</b></p>",
+        f"<p style='color:#4b5563;font-size:0.82rem;margin:4px 0;'>"
+        f"🔒 <b style='color:#4f46e5'>{st.session_state.user.email}</b>"
+        f"<span style='color:#9ca3af;font-size:0.76rem;'>{login_info}</span></p>",
         unsafe_allow_html=True)
 with col_out:
     if st.button("Logout", key="btn_logout"):
