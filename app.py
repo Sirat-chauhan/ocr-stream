@@ -1083,42 +1083,18 @@ with col_left:
 
     with input_tab2:
         st.info("📱 Works best on mobile. Point camera at document and capture.", icon="ℹ️")
-        b1, b2, b3 = st.columns(3)
+        b1, b2 = st.columns(2)
         with b1:
-            if st.button("📸 Open Camera (Full)", use_container_width=True, key="btn_open_camera"):
+            if st.button("📸 Open Camera", use_container_width=True, key="btn_open_camera"):
                 st.session_state.camera_open = True
                 st.rerun()
         with b2:
             if st.button("✖ Close Camera", use_container_width=True, key="btn_close_camera"):
                 st.session_state.camera_open = False
                 st.rerun()
-        with b3:
-            if st.button("↩ Escape Camera", use_container_width=True, key="btn_escape_camera"):
-                st.session_state.camera_open = False
-                st.rerun()
 
         camera_image = None
         if st.session_state.camera_open:
-            st.markdown("""
-            <style>
-                [data-testid="stCameraInput"] {
-                    position: fixed !important;
-                    top: 180px !important;
-                    left: 0 !important;
-                    right: 0 !important;
-                    bottom: 0 !important;
-                    z-index: 9999 !important;
-                    background: #000000 !important;
-                    border: none !important;
-                    border-radius: 0 !important;
-                    padding: 10px !important;
-                    margin: 0 !important;
-                }
-                [data-testid="stCameraInput"] video {
-                    max-height: calc(100vh - 220px) !important;
-                }
-            </style>
-            """, unsafe_allow_html=True)
             st.markdown(
                 "<p style='margin:8px 0 6px;color:#0f172a;font-weight:700;'>Take Photo</p>",
                 unsafe_allow_html=True
