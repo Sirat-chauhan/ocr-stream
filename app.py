@@ -7,7 +7,7 @@ import re
 import json
 import base64
 from datetime import datetime
-from PIL import Image, ImageEnhance, ImageOps
+from PIL import Image, ImageEnhance
 import io
 from supabase import create_client, Client
 try:
@@ -461,48 +461,20 @@ def detect_blur(file) -> float:
 
 def compress_image_bytes(raw_bytes: bytes) -> bytes:
     try:
-        # Normalize orientation + keep RGB detail for better OCR on camera captures.
-        img = ImageOps.exif_transpose(Image.open(io.BytesIO(raw_bytes))).convert("RGB")
-        long_edge = max(img.width, img.height)
-        if long_edge > 1800:
-            scale = 1800 / long_edge
-            img = img.resize((int(img.width * scale), int(img.height * scale)), Image.LANCZOS)
-        img = ImageEnhance.Contrast(img).enhance(1.25)
-        img = ImageEnhance.Sharpness(img).enhance(1.2)
-        for quality in [88, 80, 72, 64, 56]:
+        img = Image.open(io.BytesIO(raw_bytes)).convert("L")
+        if img.width > 1200:
+            img = img.resize((1200, int(img.height * 1200 / img.width)), Image.LANCZOS)
+        img = ImageEnhance.Contrast(img).enhance(1.5)
+        img = ImageEnhance.Sharpness(img).enhance(1.4)
+        for quality in [75, 60, 45, 30, 20]:
             buf = io.BytesIO()
             img.save(buf, format="JPEG", quality=quality, optimize=True)
-            if len(buf.getvalue()) <= 850*1024 or quality == 56:
+            if len(buf.getvalue()) <= 280*1024 or quality == 20:
                 return buf.getvalue()
         return buf.getvalue()
     except Exception as e:
         log_failure("Compress Image", str(e))
         return raw_bytes
-
-def build_ocr_variants(raw_bytes: bytes):
-    """Return two image variants: natural and high-contrast fallback."""
-    base = compress_image_bytes(raw_bytes)
-    variants = [base]
-    try:
-        arr = np.frombuffer(base, np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
-        if img is None:
-            return variants
-        den = cv2.fastNlMeansDenoising(img, None, h=8, templateWindowSize=7, searchWindowSize=21)
-        thr = cv2.adaptiveThreshold(den, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 35, 11)
-        thr = cv2.medianBlur(thr, 3)
-        ok, enc = cv2.imencode(".jpg", thr, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
-        if ok:
-            variants.append(enc.tobytes())
-    except Exception as e:
-        log_failure("OCR Variant Build", str(e))
-    return variants
-
-def parsed_text_length(result: dict) -> int:
-    try:
-        return sum(len((pr or {}).get("ParsedText", "") or "") for pr in (result.get("ParsedResults") or []))
-    except Exception:
-        return 0
 
 def extract_face_photo(file):
     try:
@@ -561,43 +533,8 @@ def perform_ocr(raw_bytes, language_code, engine_code, is_pdf=False, _retry=True
             safe_engine = 2 if engine_code == 3 else engine_code
             send_bytes, filename, mimetype = raw_bytes, "document.pdf", "application/pdf"
         else:
-            filename, mimetype = "image.jpg", "image/jpeg"
-            variants = build_ocr_variants(raw_bytes)
-            attempts = [(variants[0], engine_code)]
-            if engine_code != 1:
-                attempts.append((variants[0], 1))
-            if len(variants) > 1:
-                attempts.append((variants[1], engine_code if engine_code != 3 else 1))
-
-            best_result = None
-            best_len = -1
-            last_error = None
-            for send_bytes, safe_engine in attempts:
-                response = requests.post(OCR_URL, data={
-                    "apikey": OCR_API_KEY, "language": language_code,
-                    "OCREngine": safe_engine, "isOverlayRequired": False,
-                    "detectOrientation": True, "scale": True,
-                }, files={"file": (filename, send_bytes, mimetype)}, timeout=90)
-                response.raise_for_status()
-                result = response.json()
-                if result.get("IsErroredOnProcessing"):
-                    err_msgs = result.get("ErrorMessage", ["Unknown OCR error"])
-                    last_error = "; ".join(err_msgs) if isinstance(err_msgs, list) else str(err_msgs)
-                    continue
-                plen = parsed_text_length(result)
-                if plen > best_len:
-                    best_result, best_len = result, plen
-                # Good enough result; avoid extra API calls.
-                if plen >= 45:
-                    return result
-
-            if best_result:
-                return best_result
-            err_str = last_error or "Unknown OCR error"
-            if _retry and "timed out" in err_str.lower():
-                return perform_ocr(raw_bytes, language_code, 1, is_pdf, _retry=False)
-            log_failure("OCR Processing", err_str)
-            return {"error": err_str}
+            safe_engine = engine_code
+            send_bytes, filename, mimetype = compress_image_bytes(raw_bytes), "image.jpg", "image/jpeg"
 
         response = requests.post(OCR_URL, data={
             "apikey": OCR_API_KEY, "language": language_code,
@@ -1216,71 +1153,75 @@ with col_left:
             if is_pdf and engine_code == 3:
                 st.warning("⚠️ Engine 3 doesn't support PDFs — using Engine 2.")
 
+            # Blur check
+            blur_ok = True
             if file_type.startswith("image"):
                 blur_score = detect_blur(io.BytesIO(raw_bytes))
-                if blur_score < 45:
-                    st.warning(f"⚠ Image is blurry (score: {round(blur_score,1)}). Trying enhanced OCR; retake if result is weak.")
+                if blur_score < 60:
+                    st.error(f"⚠ Too blurry (score: {round(blur_score,1)}). Retake with better lighting.")
+                    blur_ok = False
                 elif blur_score < 120:
                     st.warning(f"Slightly soft (score: {round(blur_score,1)}). Will enhance.")
 
-            # Face extraction (Document mode only)
-            photo_b64 = None
-            if file_type.startswith("image") and mode == "Document":
-                with st.spinner("📸 Detecting photo..."):
-                    photo_b64 = extract_face_photo(io.BytesIO(raw_bytes))
+            if blur_ok:
+                # Face extraction (Document mode only)
+                photo_b64 = None
+                if file_type.startswith("image") and mode == "Document":
+                    with st.spinner("📸 Detecting photo..."):
+                        photo_b64 = extract_face_photo(io.BytesIO(raw_bytes))
 
-            # Run OCR
-            with st.spinner("🔍 Extracting text..."):
-                result = perform_ocr(raw_bytes, language_code, engine_code, is_pdf=is_pdf)
+                # Run OCR
+                with st.spinner("🔍 Extracting text..."):
+                    result = perform_ocr(raw_bytes, language_code, engine_code, is_pdf=is_pdf)
 
-            st.session_state.camera_bytes = None
+                st.session_state.camera_bytes = None
 
-            if "error" in result:
-                st.error(f"❌ {result['error']}")
-            elif result.get("ParsedResults"):
-                parsed_results = result["ParsedResults"]
-                processing_time = round(float(result.get("ProcessingTimeInMilliseconds",0))/1000, 3)
-                combined_text = "\n".join(pr.get("ParsedText","") for pr in parsed_results)
+                if "error" in result:
+                    st.error(f"❌ {result['error']}")
+                elif result.get("ParsedResults"):
+                    parsed_results = result["ParsedResults"]
+                    processing_time = round(float(result.get("ProcessingTimeInMilliseconds",0))/1000, 3)
+                    combined_text = "\n".join(pr.get("ParsedText","") for pr in parsed_results)
 
-                if mode == "Document":
-                    doc_type = detect_doc_type(combined_text)
-                    if doc_type == "aadhaar":
-                        fields = extract_aadhaar_fields(combined_text)
-                    elif doc_type == "pan":
-                        fields = extract_pan_fields(combined_text)
-                    elif doc_type == "dl":
-                        fields = extract_dl_fields(combined_text)
-                    elif doc_type == "voter":
-                        fields = extract_voter_fields(combined_text)
+                    if mode == "Document":
+                        doc_type = detect_doc_type(combined_text)
+                        if doc_type == "aadhaar":
+                            fields = extract_aadhaar_fields(combined_text)
+                        elif doc_type == "pan":
+                            fields = extract_pan_fields(combined_text)
+                        elif doc_type == "dl":
+                            fields = extract_dl_fields(combined_text)
+                        elif doc_type == "voter":
+                            fields = extract_voter_fields(combined_text)
+                        else:
+                            fields = {}
                     else:
+                        doc_type = "normal"
                         fields = {}
+
+                    # Save result to session state for right panel
+                    st.session_state.last_result = {
+                        "mode": mode,
+                        "doc_type": doc_type,
+                        "fields": fields,
+                        "raw_text": combined_text,
+                        "photo_b64": photo_b64,
+                        "processing_time": processing_time,
+                        "file_name": file_name,
+                        "file_size_bytes": len(raw_bytes),
+                        "parsed_results": parsed_results,
+                    }
+
+                    # Auto-save to Supabase
+                    if mode == "Document" and fields:
+                        saved, save_err = save_extraction(
+                            doc_type, fields, combined_text, file_name, len(raw_bytes))
+                        st.session_state.last_result["saved"] = saved
+                        st.session_state.last_result["save_err"] = save_err
+
+                    st.rerun()
                 else:
-                    doc_type = "normal"
-                    fields = {}
-
-                # Save result to session state for right panel
-                st.session_state.last_result = {
-                    "mode": mode,
-                    "doc_type": doc_type,
-                    "fields": fields,
-                    "raw_text": combined_text,
-                    "photo_b64": photo_b64,
-                    "processing_time": processing_time,
-                    "file_name": file_name,
-                    "file_size_bytes": len(raw_bytes),
-                    "parsed_results": parsed_results,
-                }
-
-                # Auto-save to Supabase
-                if mode == "Document" and fields:
-                    saved, save_err = save_extraction(
-                        doc_type, fields, combined_text, file_name, len(raw_bytes))
-                    st.session_state.last_result["saved"] = saved
-                    st.session_state.last_result["save_err"] = save_err
-
-                st.rerun()
-            else:
-                st.error("❌ No text could be extracted.")
+                    st.error("❌ No text could be extracted.")
 
     elif extract_clicked and not uploaded_file:
         st.warning("⚠️ Please upload a file or take a photo first.")
