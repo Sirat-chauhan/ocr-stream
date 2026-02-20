@@ -262,6 +262,14 @@ st.markdown("""
         border-radius:12px !important;
         background:#fafbff !important;
     }
+    [data-testid="stCameraInput"] button {
+        color: #ffffff !important;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.55) !important;
+    }
+    [data-testid="stCameraInput"] button svg {
+        fill: #ffffff !important;
+        color: #ffffff !important;
+    }
 
     hr { border-color:#e8eaf0 !important; margin:16px 0 !important; }
     [data-testid="stCaptionContainer"] p { color:#4b5563 !important; font-family:'DM Mono',monospace !important; font-size:0.76rem !important; }
