@@ -1071,28 +1071,11 @@ with col_left:
 
     with input_tab2:
         st.info("📱 Works best on mobile. Point camera at document and capture.", icon="ℹ️")
-        if "camera_open" not in st.session_state:
-            st.session_state.camera_open = False
-        cc1, cc2 = st.columns(2)
-        with cc1:
-            if st.button("📷 Open Camera", use_container_width=True, key="btn_open_cam"):
-                st.session_state.camera_open = True
-                st.rerun()
-        with cc2:
-            if st.button("✖ Close Camera", use_container_width=True, key="btn_close_cam"):
-                st.session_state.camera_open = False
-                st.session_state.camera_bytes = None
-                st.rerun()
-
-        camera_image = None
-        if st.session_state.camera_open:
-            st.markdown(
-                "<p style='margin:8px 0 6px;color:#0f172a;font-weight:700;'>Take Photo</p>",
-                unsafe_allow_html=True
-            )
-            camera_image = st.camera_input("Take Photo", label_visibility="visible")
-        else:
-            st.caption("Click `Open Camera` to show the take photo option.")
+        st.markdown(
+            "<p style='margin:8px 0 6px;color:#0f172a;font-weight:700;'>Take Photo From Here</p>",
+            unsafe_allow_html=True
+        )
+        camera_image = st.camera_input("Take Photo From Here", label_visibility="visible")
 
         if camera_image is not None:
             camera_image.seek(0, 2); _csz = camera_image.tell(); camera_image.seek(0)
@@ -1101,7 +1084,6 @@ with col_left:
             else:
                 st.session_state.camera_bytes = camera_image.read()
                 st.session_state.camera_fsize = _csz
-                st.session_state.camera_open = False
 
         if st.session_state.camera_bytes:
             cam_buf = io.BytesIO(st.session_state.camera_bytes)
