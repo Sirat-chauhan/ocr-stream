@@ -966,15 +966,38 @@ st.markdown("""
 # 9. MODE + SETTINGS (above the split)
 # ================================================================
 st.markdown('<div class="section-label">Select Mode</div>', unsafe_allow_html=True)
-col_m1, col_m2 = st.columns(2)
-with col_m1:
-    if st.button("📄 Text Extraction", use_container_width=True):
-        st.session_state.ocr_mode = "Normal"
-        st.session_state.last_result = None
-with col_m2:
-    if st.button("🪪 Document OCR", use_container_width=True):
-        st.session_state.ocr_mode = "Document"
-        st.session_state.last_result = None
+with st.container(border=True):
+    mode = st.session_state.ocr_mode
+    mode_label = "Text Extraction" if mode == "Normal" else "Document OCR"
+    st.markdown(
+        f"<p style='margin:0 0 10px;color:#334155;font-size:0.82rem;font-weight:600;'>Selected Mode: {mode_label}</p>",
+        unsafe_allow_html=True
+    )
+    col_m1, col_m2 = st.columns(2)
+    with col_m1:
+        if mode == "Normal":
+            st.markdown(
+                """<div style="background:#0f172a;color:#ffffff;border-radius:10px;padding:10px 12px;
+                text-align:center;font-weight:700;border:1px solid #020617;">📄 Text Extraction</div>""",
+                unsafe_allow_html=True,
+            )
+        else:
+            if st.button("📄 Text Extraction", use_container_width=True, key="btn_mode_text"):
+                st.session_state.ocr_mode = "Normal"
+                st.session_state.last_result = None
+                st.rerun()
+    with col_m2:
+        if mode == "Document":
+            st.markdown(
+                """<div style="background:#0f172a;color:#ffffff;border-radius:10px;padding:10px 12px;
+                text-align:center;font-weight:700;border:1px solid #020617;">🪪 Document OCR</div>""",
+                unsafe_allow_html=True,
+            )
+        else:
+            if st.button("🪪 Document OCR", use_container_width=True, key="btn_mode_doc"):
+                st.session_state.ocr_mode = "Document"
+                st.session_state.last_result = None
+                st.rerun()
 
 mode = st.session_state.ocr_mode
 if mode == "Document":
