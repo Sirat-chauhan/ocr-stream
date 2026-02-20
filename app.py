@@ -257,27 +257,10 @@ st.markdown("""
     [data-testid="stWarning"] { background:#fffbeb !important; border-color:#fcd34d !important; }
     [data-testid="stSuccess"] { background:#ecfdf5 !important; border-color:#a7f3d0 !important; }
 
-    [data-testid="stCameraInput"] { border:2px dashed #c7d2fe !important; border-radius:12px !important; background:#fafbff !important; }
-    [data-testid="stCameraInput"] button {
-        color: #ffffff !important;
-        font-weight: 700 !important;
-        text-shadow: 0 1px 2px rgba(0,0,0,0.45) !important;
-    }
-    [data-testid="stCameraInput"] button svg,
-    [data-testid="stCameraInput"] button * {
-        color: #ffffff !important;
-        fill: #ffffff !important;
-    }
-    [data-testid="stCameraInput"] button[aria-label*="Switch"],
-    [data-testid="stCameraInput"] button[title*="Switch"],
-    [data-testid="stCameraInput"] button[aria-label*="camera"],
-    [data-testid="stCameraInput"] button[title*="camera"] {
-        background: rgba(15, 23, 42, 0.86) !important;
-        border: 2px solid #ffffff !important;
-        border-radius: 999px !important;
-        min-width: 42px !important;
-        min-height: 42px !important;
-        opacity: 1 !important;
+    [data-testid="stCameraInput"] {
+        border:2px dashed #c7d2fe !important;
+        border-radius:12px !important;
+        background:#fafbff !important;
     }
 
     hr { border-color:#e8eaf0 !important; margin:16px 0 !important; }
