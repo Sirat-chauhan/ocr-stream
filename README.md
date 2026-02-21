@@ -68,40 +68,6 @@ Supabase Database (Extracted Data)
 
 ---
 
-# 🗄 Database Structure
-
-## ✅ Table: `documents`
-
-Single scalable table for all document types.
-
-```sql
-create table documents (
-  id uuid default gen_random_uuid() primary key,
-  user_id uuid references auth.users(id) on delete cascade not null,
-  doc_type text not null, -- aadhaar, pan, dl, voter, other
-  image_url text not null,
-  extracted_data jsonb not null,
-  raw_text text,
-  created_at timestamptz default now()
-);
-```
-
----
-
-## 🔐 Row Level Security (RLS)
-
-```sql
-alter table documents enable row level security;
-
-create policy "Users can access only their documents"
-on documents
-for all
-using (auth.uid() = user_id);
-```
-
-Users can only see their own uploaded documents.
-
----
 
 # 🖼 Supabase Storage Setup
 
@@ -110,55 +76,6 @@ Users can only see their own uploaded documents.
 3. Enable file size restriction
 4. Enable MIME restriction (image/jpeg, image/png, application/pdf)
 
-⚠️ Store only `image_url` in the database
-⚠️ Do NOT store base64 images in DB
-
----
-
-# 📦 Example Extracted Data (JSONB)
-
-### Aadhaar
-
-```json
-{
-  "name": "Rahul Kumar",
-  "aadhaar_number": "1234 5678 9012",
-  "dob": "01/01/1995"
-}
-```
-
-### PAN
-
-```json
-{
-  "name": "Rahul Kumar",
-  "pan_number": "ABCDE1234F",
-  "father_name": "Ramesh Kumar"
-}
-```
-
-### Driving License
-
-```json
-{
-  "name": "Rahul Kumar",
-  "dl_number": "DL-0420110149646",
-  "dob": "01/01/1995",
-  "valid_till": "01/01/2035"
-}
-```
-
-### Voter ID
-
-```json
-{
-  "name": "Rahul Kumar",
-  "voter_id": "ABC1234567",
-  "father_name": "Ramesh Kumar"
-}
-```
-
----
 
 # 🔑 Environment Variables
 
@@ -173,7 +90,6 @@ SUPABASE_SERVICE_KEY=your_service_role_key
 ⚠️ Never push `.env` to GitHub
 ⚠️ Add `.env` to `.gitignore`
 
----
 
 # ▶️ Run Locally
 
