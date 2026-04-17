@@ -57,7 +57,7 @@ def render_sidebar(*, supabase, auth_logout_fn, load_extractions_fn):
                 t = r.get("doc_type", "other")
                 type_counts[t] = type_counts.get(t, 0) + 1
 
-            label_map = {"aadhaar": "Aadhaar", "pan": "PAN", "dl": "DL", "voter": "Voter", "other": "Other"}
+            label_map = {"aadhaar": "Aadhaar", "pan": "PAN", "dl": "DL", "voter": "Voter", "passport": "Passport", "other": "Other"}
             badges_html = " ".join(
                 f'<span class="sb-record-badge sb-badge-{t}">{label_map.get(t,t)} {c}</span>' for t, c in type_counts.items()
             )
@@ -85,6 +85,8 @@ def render_sidebar(*, supabase, auth_logout_fn, load_extractions_fn):
                     keys = [("Name", "holder_name"), ("DL No", "dl_number"), ("Issued", "date_of_issue"), ("Valid Till", "valid_till"), ("DOB", "dob"), ("Blood", "blood_group"), ("Vehicle", "vehicle_class"), ("S/D/W of", "son_daughter_wife_of"), ("Authority", "issuing_authority"), ("State", "state")]
                 elif dtype == "voter":
                     keys = [("Name", "holder_name"), ("EPIC No", "epic_number"), ("Father/Husb", "father_husband_name"), ("DOB", "dob"), ("Gender", "gender"), ("Constitency", "constituency"), ("Part No", "part_no"), ("Serial No", "serial_no"), ("State", "state")]
+                elif dtype == "passport":
+                    keys = [("Name", "holder_name"), ("Passport No", "passport_number"), ("Nationality", "account_type"), ("DOB", "dob"), ("Issued", "date_of_issue"), ("Valid Till", "valid_till"), ("Place of Issue", "issuing_authority")]
                 else:
                     keys = [("Raw Text", "raw_text")]
 
@@ -94,7 +96,7 @@ def render_sidebar(*, supabase, auth_logout_fn, load_extractions_fn):
                     if search_q.lower() not in searchable:
                         continue
 
-                doc_num = r.get("aadhaar_number") or r.get("pan_number") or r.get("dl_number") or r.get("epic_number") or ""
+                doc_num = r.get("aadhaar_number") or r.get("pan_number") or r.get("dl_number") or r.get("epic_number") or r.get("passport_number") or ""
                 short_num = (doc_num[:10] + "…") if len(doc_num) > 10 else doc_num
 
                 with st.expander(f"{dlabel} · {name}", expanded=False):

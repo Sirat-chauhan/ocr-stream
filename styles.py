@@ -70,6 +70,7 @@ APP_CSS = """
     .badge-normal  { background:#eff6ff; color:#3b82f6; border:1px solid #bfdbfe; }
     .badge-dl      { background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; }
     .badge-voter   { background:#faf5ff; color:#7c3aed; border:1px solid #ddd6fe; }
+    .badge-passport{ background:#fff1f2; color:#be123c; border:1px solid #fecdd3; }
 
     .kv-table { width:100%; border-collapse:collapse; font-family:'DM Mono',monospace; font-size:0.8rem; }
     .kv-table th {
@@ -305,6 +306,7 @@ SIDEBAR_CSS = """
 .sb-badge-pan     { background:#eff6ff; color:#4f46e5; border:1px solid #c7d2fe; }
 .sb-badge-dl      { background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; }
 .sb-badge-voter   { background:#faf5ff; color:#7c3aed; border:1px solid #ddd6fe; }
+.sb-badge-passport{ background:#fff1f2; color:#be123c; border:1px solid #fecdd3; }
 .sb-badge-other   { background:#f3f4f6; color:#6b7280; border:1px solid #e5e7eb; }
 .sb-kv { font-family:'DM Mono',monospace; font-size:0.7rem; }
 .sb-kv-row {

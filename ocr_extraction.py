@@ -186,17 +186,23 @@ def detect_doc_type(text):
         "electoral", "निर्वाचन आयोग", "मतदाता", "part no",
         "assembly constituency", "elector photo identity card", "kkd", "kk"
     ]
+    passport_signals = [
+        "passport", "republic of india", "nationality", "given name", "surname",
+        "place of birth", "place of issue", "date of expiry"
+    ]
 
     pan_pat     = re.search(r'\b[A-Z]{5}[0-9]{4}[A-Z]\b', text)
     aadhaar_pat = re.search(r'\b\d{4}[\s\-]\d{4}[\s\-]\d{4}\b|\b\d{12}\b|XXXX\s*XXXX\s*\d{4}', text, re.IGNORECASE)
     dl_pat      = re.search(r'\b[A-Z]{2}[\s\-]?\d{2}[\s\-]?\d{4,11}\b', text)
     epic_pat    = re.search(r'\b[A-Z]{3}\d{7}\b', text)
+    passport_pat= re.search(r'\b[A-Z][0-9]{7}\b', text)
 
     scores = {
         "aadhaar": sum(2 for s in aadhaar_signals if s in t) + (6 if aadhaar_pat else 0),
         "pan":     sum(2 for s in pan_signals     if s in t) + (6 if pan_pat     else 0),
         "dl":      sum(2 for s in dl_signals      if s in t) + (6 if dl_pat      else 0),
         "voter":   sum(2 for s in voter_signals   if s in t) + (6 if epic_pat    else 0),
+        "passport":sum(2 for s in passport_signals if s in t) + (6 if passport_pat else 0),
     }
     best = max(scores, key=scores.get)
     return best if scores[best] > 0 else "unknown"
@@ -696,3 +702,77 @@ def extract_voter_fields(text):
     return fields
 
 
+def extract_passport_fields(text):
+    fields = {}
+    text = clean_ocr_text(text)
+    full = text
+
+    # Passport Number
+    pp_m = re.search(r'\b([A-PR-WYa-pr-wy][1-9]\d\s?\d{4}[1-9])\b', full)
+    if not pp_m:
+         pp_m = re.search(r'\b([A-Z]\d{7})\b', full)
+    if pp_m:
+        fields["Passport Number"] = pp_m.group(1).replace(' ', '')
+
+    # Check for MRZ strings
+    mrz_lines = re.findall(r'(P<IND[A-Z0-9<]+)', full)
+    if mrz_lines:
+        line1 = mrz_lines[0]
+        # Names from MRZ: P<INDLASTNAME<<FIRSTNAME<<<<<
+        name_part = line1[5:].split('<<')
+        if len(name_part) == 2:
+            surname = name_part[0].replace('<', ' ').strip()
+            given_name = name_part[1].replace('<', ' ').strip()
+            if surname and "Surname" not in fields: fields["Surname"] = surname.title()
+            if given_name and "Given Name" not in fields: fields["Given Name"] = given_name.title()
+            fields["Name"] = f"{fields.get('Given Name', '')} {fields.get('Surname', '')}".strip()
+
+    # Given Name / Name fallback
+    if "Given Name" not in fields:
+        nm_m = re.search(r'(?:given\s*names?|नाम)\s*[:\-]?\n?([A-Za-z\s]+)', full, re.IGNORECASE)
+        if nm_m:
+            candidate = re.sub(r'[^A-Za-z\s]', '', nm_m.group(1)).strip()
+            if len(candidate) > 2:
+                fields["Given Name"] = candidate.title()
+
+    if "Surname" not in fields:
+        sn_m = re.search(r'(?:surname|उपनाम)\s*[:\-]?\n?([A-Za-z\s]+)', full, re.IGNORECASE)
+        if sn_m:
+            candidate = re.sub(r'[^A-Za-z\s]', '', sn_m.group(1)).strip()
+            if len(candidate) > 2:
+                fields["Surname"] = candidate.title()
+    
+    if "Given Name" in fields and "Name" not in fields:
+        fields["Name"] = f"{fields.get('Given Name', '')} {fields.get('Surname', '')}".strip()
+
+    # Dates
+    dob_m = re.search(r'(?:date\s*of\s*birth|dob)\s*[:\-/]?\n?\s*(\d{1,2}[\-/\.]\d{1,2}[\-/\.]\d{2,4})', full, re.IGNORECASE)
+    if dob_m: fields["Date of Birth"] = dob_m.group(1)
+
+    doi_m = re.search(r'(?:date\s*of\s*issue)\s*[:\-/]?\n?\s*(\d{1,2}[\-/\.]\d{1,2}[\-/\.]\d{2,4})', full, re.IGNORECASE)
+    if doi_m: fields["Date of Issue"] = doi_m.group(1)
+
+    doe_m = re.search(r'(?:date\s*of\s*expiry)\s*[:\-/]?\n?\s*(\d{1,2}[\-/\.]\d{1,2}[\-/\.]\d{2,4})', full, re.IGNORECASE)
+    if doe_m: fields["Date of Expiry"] = doe_m.group(1)
+
+    # Place of Birth / Issue
+    pob_m = re.search(r'(?:place\s*of\s*birth)\s*[:\-/]?\n?\s*([A-Za-z\s,]+)', full, re.IGNORECASE)
+    if pob_m:
+        val = pob_m.group(1).split('\n')[0].strip()
+        if len(val) > 2: fields["Place of Birth"] = val.title()
+
+    poi_m = re.search(r'(?:place\s*of\s*issue)\s*[:\-/]?\n?\s*([A-Za-z\s,]+)', full, re.IGNORECASE)
+    if poi_m:
+        val = poi_m.group(1).split('\n')[0].strip()
+        if len(val) > 2: fields["Place of Issue"] = val.title()
+
+    # Nationality
+    if re.search(r'\bindian\b', full, re.IGNORECASE):
+        fields["Nationality"] = "Indian"
+    
+    # Blood Group
+    bg_m = re.search(r'\b([ABO]{1,2}[\+\-])\b', full)
+    if bg_m:
+        fields["Blood Group"] = bg_m.group(1)
+
+    return fields

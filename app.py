@@ -26,6 +26,7 @@ from ocr_extraction import (
     extract_pan_fields,
     extract_dl_fields,
     extract_voter_fields,
+    extract_passport_fields,
 )
 from ui_helpers import render_kv_table, render_confidence_bar, photo_html
 from sidebar_ui import render_sidebar
@@ -372,6 +373,8 @@ with col_left:
                             fields = extract_dl_fields(combined_text)
                         elif doc_type == "voter":
                             fields = extract_voter_fields(combined_text)
+                        elif doc_type == "passport":
+                            fields = extract_passport_fields(combined_text)
                         else:
                             fields = {}
                     else:
@@ -436,6 +439,7 @@ with col_right:
                 "pan": "PAN Card",
                 "dl": "Driving Licence",
                 "voter": "Voter ID",
+                "passport": "Passport",
                 "unknown": "Unknown Document",
             }.get(doc_type, "Document")
             badge_cls = {
@@ -443,6 +447,7 @@ with col_right:
                 "pan": "badge-pan",
                 "dl": "badge-dl",
                 "voter": "badge-voter",
+                "passport": "badge-passport",
                 "unknown": "badge-unknown",
             }.get(doc_type, "badge-unknown")
 
@@ -477,7 +482,7 @@ with col_right:
                 st.markdown('<div class="section-label">Extracted Fields</div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="info-card">{render_kv_table(fields)}</div>', unsafe_allow_html=True)
 
-                expected = {"aadhaar": 8, "pan": 5, "dl": 8, "voter": 7}.get(doc_type, 4)
+                expected = {"aadhaar": 8, "pan": 5, "dl": 8, "voter": 7, "passport": 6}.get(doc_type, 4)
                 st.markdown(render_confidence_bar(min(len(fields) / expected, 1.0)), unsafe_allow_html=True)
 
                 saved = res.get("saved")
@@ -488,6 +493,7 @@ with col_right:
                         st.code(
                             """
 ALTER TABLE extractions
+  ADD COLUMN IF NOT EXISTS passport_number      TEXT,
   ADD COLUMN IF NOT EXISTS enrolment_no         TEXT,
   ADD COLUMN IF NOT EXISTS date_of_issue        TEXT,
   ADD COLUMN IF NOT EXISTS son_daughter_wife_of TEXT,

@@ -107,7 +107,7 @@ _CORE_COLUMNS = {
     "pan_number", "father_name", "account_type", "issued_by",
     "dl_number", "valid_till", "vehicle_class", "blood_group", "issuing_authority",
     "epic_number", "father_husband_name", "constituency", "part_no",
-    "raw_text",
+    "raw_text", "passport_number",
 }
 
 _EXTENDED_COLUMNS = {
@@ -140,7 +140,7 @@ def upload_photo_to_storage(supabase: Client, photo_b64: str, doc_type: str, log
 def _build_row(fields, doc_type, file_name, size_kb, raw_text, include_extended=True, photo_url=""):
     row = {
         "user_id": st.session_state.user.id,
-        "doc_type": doc_type if doc_type in ("aadhaar", "pan", "dl", "voter") else "other",
+        "doc_type": doc_type if doc_type in ("aadhaar", "pan", "dl", "voter", "passport") else "other",
         "file_name": file_name,
         "file_size_kb": size_kb,
         "holder_name": fields.get("Name", ""),
@@ -156,14 +156,15 @@ def _build_row(fields, doc_type, file_name, size_kb, raw_text, include_extended=
         "account_type": fields.get("Account Type", ""),
         "issued_by": fields.get("Issued By", ""),
         "dl_number": fields.get("DL Number", ""),
-        "valid_till": fields.get("Valid Till", ""),
+        "valid_till": fields.get("Valid Till", "") or fields.get("Date of Expiry", ""),
         "vehicle_class": fields.get("Vehicle Class", ""),
         "blood_group": fields.get("Blood Group", ""),
-        "issuing_authority": fields.get("Issuing Authority", ""),
+        "issuing_authority": fields.get("Issuing Authority", "") or fields.get("Place of Issue", ""),
         "epic_number": fields.get("EPIC Number", ""),
         "father_husband_name": fields.get("Father's Name", "") or fields.get("Father/Husband Name", ""),
         "constituency": fields.get("Constituency", ""),
         "part_no": fields.get("Part No", ""),
+        "passport_number": fields.get("Passport Number", ""),
         "raw_text": raw_text[:4000],
         "photo_url": photo_url,
     }
@@ -187,6 +188,7 @@ def _get_doc_unique_key(doc_type, fields):
         "pan": ("pan_number", fields.get("PAN Number", "")),
         "dl": ("dl_number", fields.get("DL Number", "").replace(" ", "").replace("-", "")),
         "voter": ("epic_number", fields.get("EPIC Number", "")),
+        "passport": ("passport_number", fields.get("Passport Number", "")),
     }
     return mapping.get(doc_type, (None, None))
 
