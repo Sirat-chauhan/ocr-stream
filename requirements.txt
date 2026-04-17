@@ -1,6 +1,6 @@
 streamlit
 requests
 opencv-python-headless
-numpy
+numpy<2.0.0
 Pillow
 supabase
