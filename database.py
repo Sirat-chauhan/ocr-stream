@@ -100,6 +100,27 @@ def auth_logout(supabase: Client):
     st.session_state.access_token = None
 
 
+def auth_reset_password(supabase: Client, email: str):
+    try:
+        supabase.auth.reset_password_for_email(
+            email,
+            options={"redirect_to": "https://ocr-stream-nhjd5pbhtxcm99hfgncbre.streamlit.app"}
+        )
+        return True, None
+    except Exception as e:
+        return False, _friendly_auth_error(e)
+
+
+def auth_update_password(supabase: Client, code: str, new_password: str):
+    try:
+        supabase.auth.exchange_code_for_session({"auth_code": code})
+        supabase.auth.update_user({"password": new_password})
+        supabase.auth.sign_out()
+        return True, None
+    except Exception as e:
+        return False, _friendly_auth_error(e)
+
+
 _CORE_COLUMNS = {
     "user_id", "doc_type", "file_name", "file_size_kb",
     "holder_name", "dob", "gender",
