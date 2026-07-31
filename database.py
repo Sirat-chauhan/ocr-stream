@@ -39,6 +39,10 @@ def _friendly_auth_error(err: Exception) -> str:
     lowered = msg.lower()
     if "getaddrinfo failed" in lowered or "name or service not known" in lowered:
         return "Cannot reach Supabase. Check SUPABASE_URL in .streamlit/secrets.toml and confirm the project URL is correct."
+    if "user already registered" in lowered or "already exists" in lowered:
+        return "User already exists! Please try to login."
+    if "invalid login credentials" in lowered:
+        return "Wrong credentials. Please try again or use Forgot Password."
     return msg
 
 

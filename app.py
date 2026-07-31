@@ -120,17 +120,30 @@ def render_auth_ui():
                 st.rerun()
             return
 
-        tab_login, tab_signup, tab_forgot = st.tabs(["🔐 Login", "✍ Sign Up", "🔑 Forgot Password"])
+        tab_login, tab_signup = st.tabs(["🔐 Login", "✍ Sign Up"])
         with tab_login:
             email = st.text_input("Email", key="login_email", placeholder="you@example.com")
             password = st.text_input("Password", type="password", key="login_pw", placeholder="••••••••")
-            if st.button("Login", use_container_width=True, key="btn_login"):
-                ok, err = auth_login(supabase, email, password)
-                if ok:
-                    st.success("Logged in!")
-                    st.rerun()
-                else:
-                    st.error(f"Login failed: {err}")
+            
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if st.button("Login", use_container_width=True, key="btn_login"):
+                    ok, err = auth_login(supabase, email, password)
+                    if ok:
+                        st.success("Logged in!")
+                        st.rerun()
+                    else:
+                        st.error(f"Login failed: {err}")
+            with col2:
+                if st.button("Forgot Password?", use_container_width=True, key="btn_forgot"):
+                    if not email:
+                        st.error("Please enter your email above first.")
+                    else:
+                        ok, err = auth_reset_password(supabase, email)
+                        if ok:
+                            st.success("Check your email for the reset link!")
+                        else:
+                            st.error(f"Failed to send reset link: {err}")
 
         with tab_signup:
             email = st.text_input("Email", key="signup_email", placeholder="you@example.com")
@@ -141,18 +154,6 @@ def render_auth_ui():
                     st.success("Account created! Check your email to confirm, then log in.")
                 else:
                     st.error(f"Sign up failed: {err}")
-                    
-        with tab_forgot:
-            email = st.text_input("Email", key="forgot_email", placeholder="you@example.com")
-            if st.button("Send Reset Link", use_container_width=True, key="btn_forgot"):
-                if not email:
-                    st.error("Please enter your email.")
-                else:
-                    ok, err = auth_reset_password(supabase, email)
-                    if ok:
-                        st.success("Check your email for the password reset link.")
-                    else:
-                        st.error(f"Failed to send reset link: {err}")
 
 
 # ================================================================
