@@ -1,0 +1,41 @@
+name: Keep Supabase & App Alive
+
+on:
+  schedule:
+    # Run at 00:00 every 2 days to prevent Supabase & Streamlit from pausing
+    - cron: '0 0 */2 * *'
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Streamlit App
+        run: |
+          echo "Pinging Streamlit app..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://ocr-stream-nhjd5pbhtxcm99hfgncbre.streamlit.app/")
+          echo "Streamlit app responded with HTTP status $HTTP_STATUS"
+
+      - name: Ping Supabase Database
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "⚠️ Secrets are not set in GitHub repository. Please add SUPABASE_URL and SUPABASE_ANON_KEY to Repository Secrets."
+            exit 0
+          fi
+          
+          echo "Pinging Supabase REST API..."
+          # Fetch the OpenAPI schema from PostgREST to keep the database active
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$SUPABASE_URL/rest/v1/" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+          
+          echo "Supabase responded with HTTP status $HTTP_STATUS"
+          if [ "$HTTP_STATUS" -eq 200 ]; then
+            echo "✅ Successfully pinged Supabase."
+          else
+            echo "❌ Failed to ping Supabase."
+            exit 1
+          fi
